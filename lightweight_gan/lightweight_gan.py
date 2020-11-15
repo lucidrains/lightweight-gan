@@ -111,6 +111,34 @@ class Generator(nn.Module):
         x = self.out_conv(x)
         return x.tanh()
 
+class SimpleDecoder(nn.Module):
+    def __init__(
+        self,
+        *,
+        chan_in,
+        num_upsamples = 4
+    ):
+        super().__init__()
+        self.layers = nn.ModuleList([])
+
+        chans = chan_in
+        for ind in range(num_upsamples):
+            last_layer = ind == (num_upsamples - 1)
+            chan_out = chans if not last_layer else 3 * 2
+            layer = nn.Sequential(
+                nn.Upsample(scale_factor = 2),
+                nn.Conv2d(chans, chan_out, 3, padding = 1),
+                nn.BatchNorm2d(chan_out),
+                nn.GLU(dim = 1)
+            )
+            self.layers.append(layer)
+            chans //= 2
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
 class Discriminator(nn.Module):
     def __init__(
         self,
@@ -169,7 +197,11 @@ class Discriminator(nn.Module):
             nn.Conv2d(last_chan, 1, 4)
         )
 
+        self.decoder = SimpleDecoder(chan_in = last_chan)
+
     def forward(self, x):
+        orig_img = x
+
         for layer in self.non_residual_layers:
             x = layer(x)
 
@@ -177,7 +209,17 @@ class Discriminator(nn.Module):
             x = layer(x) + residual_layer(x)
 
         out = self.to_logits(x)
-        return out.flatten(1)
+
+        # self-supervised auto-encoding loss
+
+        reconstructed_img = self.decoder(x)
+
+        aux_loss = F.mse_loss(
+            reconstructed_img,
+            F.interpolate(orig_img, size = reconstructed_img.shape[2:])
+        )
+
+        return out.flatten(1), aux_loss
 
 class LightweightGAN(nn.Module):
     def __init__(self):
