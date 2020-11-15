@@ -42,8 +42,8 @@ class Generator(nn.Module):
         fmap_inverse_coef = 12
     ):
         super().__init__()
-        num_layers = log2(image_size)
-        assert num_layers.is_integer(), 'image size must be a power of 2'
+        resolution = log2(image_size)
+        assert resolution.is_integer(), 'image size must be a power of 2'
         fmap_max = default(fmap_max, latent_dim)
 
         self.initial_conv = nn.Sequential(
@@ -52,7 +52,7 @@ class Generator(nn.Module):
             nn.GLU(dim = 1)
         )
 
-        num_layers = int(num_layers) - 2
+        num_layers = int(resolution) - 2
         features = list(map(lambda n: (n,  2 ** (fmap_inverse_coef - n)), range(2, num_layers + 2)))
         features = list(map(lambda n: (n[0], min(n[1], fmap_max)), features))
         features = list(map(lambda n: 3 if n[0] >= 8 else n[1], features))
@@ -69,10 +69,15 @@ class Generator(nn.Module):
         self.sle_map = dict(self.sle_map)
 
         for (resolution, (chan_in, chan_out)) in zip(self.res_layers, in_out_features):
-            sle = SLE(
-                chan_in = chan_out,
-                chan_out = self.res_to_feature_map[self.sle_map[resolution]][-1]
-            ) if resolution in self.sle_map else None
+            sle = None
+            if resolution in self.sle_map:
+                residual_layer = self.sle_map[resolution]
+                sle_chan_out = self.res_to_feature_map[residual_layer][-1]
+
+                sle = SLE(
+                    chan_in = chan_out,
+                    chan_out = sle_chan_out
+                )
 
             layer = nn.ModuleList([
                 nn.Sequential(
@@ -107,10 +112,72 @@ class Generator(nn.Module):
         return x.tanh()
 
 class Discriminator(nn.Module):
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        image_size,
+        fmap_max = 512,
+        fmap_inverse_coef = 12
+    ):
         super().__init__()
+        resolution = log2(image_size)
+        assert resolution.is_integer(), 'image size must be a power of 2'
+
+        num_non_residual_layers = max(0, int(resolution) - 8)
+        num_residual_layers = 8 - 3
+
+        features = list(map(lambda n: (n,  2 ** (fmap_inverse_coef - n)), range(8, 2, -1)))
+        features = list(map(lambda n: (n[0], min(n[1], fmap_max)), features))
+        chan_in_out = zip(features[:-1], features[1:])
+
+        self.non_residual_layers = nn.ModuleList([])
+        for ind in range(num_non_residual_layers):
+            first_layer = ind == 0
+            last_layer = ind == (num_non_residual_layers - 1)
+            chan_out = features[0][-1] if last_layer else 3
+
+            self.non_residual_layers.append(nn.Sequential(
+                nn.Conv2d(3, chan_out, 4, stride = 2, padding = 1),
+                nn.BatchNorm2d(3) if not first_layer else nn.Identity(),
+                nn.LeakyReLU(0.1)
+            ))
+
+        self.residual_layers = nn.ModuleList([])
+        for (_, chan_in), (_, chan_out) in chan_in_out:
+            self.residual_layers.append(nn.ModuleList([
+                nn.Sequential(
+                    nn.Conv2d(chan_in, chan_out, 4, stride = 2, padding = 1),
+                    nn.BatchNorm2d(chan_out),
+                    nn.LeakyReLU(0.1),
+                    nn.Conv2d(chan_out, chan_out, 3, padding = 1),
+                    nn.BatchNorm2d(chan_out),
+                    nn.LeakyReLU(0.1)
+                ),
+                nn.Sequential(
+                    nn.AvgPool2d(2),
+                    nn.Conv2d(chan_in, chan_out, 1),
+                    nn.BatchNorm2d(chan_out),
+                    nn.LeakyReLU(0.1)
+                ),
+            ]))
+
+        last_chan = features[-1][-1]
+        self.to_logits = nn.Sequential(
+            nn.Conv2d(last_chan, last_chan, 1),
+            nn.BatchNorm2d(last_chan),
+            nn.LeakyReLU(0.1),
+            nn.Conv2d(last_chan, 1, 4)
+        )
+
     def forward(self, x):
-        return x
+        for layer in self.non_residual_layers:
+            x = layer(x)
+
+        for (layer, residual_layer) in self.residual_layers:
+            x = layer(x) + residual_layer(x)
+
+        out = self.to_logits(x)
+        return out.flatten(1)
 
 class LightweightGAN(nn.Module):
     def __init__(self):
