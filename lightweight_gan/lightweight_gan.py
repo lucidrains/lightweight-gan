@@ -2,6 +2,7 @@ import torch
 from random import random
 from math import log2, floor
 import torch.nn.functional as F
+from functools import partial
 from torch import nn, einsum
 from einops import rearrange
 
@@ -227,10 +228,9 @@ class Discriminator(nn.Module):
             F.interpolate(orig_img, size = recon_img_8x8.shape[2:])
         )
 
-        rand_quadrant = floor(random() * 4)
-
-        layer_16x16_part = rearrange(layer_16x16, 'b c (m h) (n w) -> (m n) b c h w', m = 2, n = 2)[rand_quadrant]
-        img_part = rearrange(orig_img, 'b c (m h) (n w) -> (m n) b c h w', m = 2, n = 2)[rand_quadrant]
+        select_random_quadrant = lambda rand_quadrant, img: rearrange(img, 'b c (m h) (n w) -> (m n) b c h w', m = 2, n = 2)[rand_quadrant]
+        crop_image_fn = partial(select_random_quadrant, floor(random() * 4))
+        img_part, layer_16x16_part = map(crop_image_fn, (orig_img, layer_16x16))
 
         recon_img_16x16 = self.decoder2(layer_16x16_part)
 
