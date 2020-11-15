@@ -1,5 +1,6 @@
 import torch
-from math import log2
+from random import random
+from math import log2, floor
 import torch.nn.functional as F
 from torch import nn, einsum
 from einops import rearrange
@@ -197,7 +198,8 @@ class Discriminator(nn.Module):
             nn.Conv2d(last_chan, 1, 4)
         )
 
-        self.decoder = SimpleDecoder(chan_in = last_chan)
+        self.decoder1 = SimpleDecoder(chan_in = last_chan)
+        self.decoder2 = SimpleDecoder(chan_in = features[-2][-1])
 
     def forward(self, x):
         orig_img = x
@@ -205,19 +207,39 @@ class Discriminator(nn.Module):
         for layer in self.non_residual_layers:
             x = layer(x)
 
+        layer_outputs = []
+
         for (layer, residual_layer) in self.residual_layers:
             x = layer(x) + residual_layer(x)
+            layer_outputs.append(x)
 
         out = self.to_logits(x)
 
         # self-supervised auto-encoding loss
 
-        reconstructed_img = self.decoder(x)
+        layer_8x8 = layer_outputs[-1]
+        layer_16x16 = layer_outputs[-2]
 
-        aux_loss = F.mse_loss(
-            reconstructed_img,
-            F.interpolate(orig_img, size = reconstructed_img.shape[2:])
+        recon_img_8x8 = self.decoder1(layer_8x8)
+
+        aux_loss1 = F.mse_loss(
+            recon_img_8x8,
+            F.interpolate(orig_img, size = recon_img_8x8.shape[2:])
         )
+
+        rand_quadrant = floor(random() * 4)
+
+        layer_16x16_part = rearrange(layer_16x16, 'b c (m h) (n w) -> (m n) b c h w', m = 2, n = 2)[rand_quadrant]
+        img_part = rearrange(orig_img, 'b c (m h) (n w) -> (m n) b c h w', m = 2, n = 2)[rand_quadrant]
+
+        recon_img_16x16 = self.decoder2(layer_16x16_part)
+
+        aux_loss2 = F.mse_loss(
+            recon_img_16x16,
+            F.interpolate(img_part, size = recon_img_16x16.shape[2:])
+        )
+
+        aux_loss = aux_loss1 + aux_loss2
 
         return out.flatten(1), aux_loss
 
