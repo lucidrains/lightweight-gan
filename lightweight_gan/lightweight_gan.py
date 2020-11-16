@@ -50,10 +50,10 @@ def raise_if_nan(t):
     if torch.isnan(t):
         raise NanException
 
-def gradient_penalty(images, output, weight = 10):
+def gradient_penalty(images, outputs, weight = 10):
     batch_size = images.shape[0]
-    gradients = torch_grad(outputs=output, inputs=images,
-                           grad_outputs=torch.ones(output.size(), device=images.device),
+    gradients = torch_grad(outputs=outputs, inputs=images,
+                           grad_outputs=list(map(lambda t: torch.ones(t.size()).cuda(), outputs)),
                            create_graph=True, retain_graph=True, only_inputs=True)[0]
 
     gradients = gradients.reshape(batch_size, -1)
@@ -595,7 +595,7 @@ class Trainer():
             disc_loss = divergence
 
             if apply_gradient_penalty:
-                gp = gradient_penalty(image_batch, real_output)
+                gp = gradient_penalty(image_batch, (real_output,))
                 self.last_gp_loss = gp.clone().detach().item()
                 disc_loss = disc_loss + gp
 
