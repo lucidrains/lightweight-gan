@@ -4,7 +4,7 @@ from random import random
 import math
 from math import log2, floor
 from functools import partial
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from pathlib import Path
 from shutil import rmtree
 
