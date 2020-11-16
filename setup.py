@@ -24,9 +24,12 @@ setup(
     'generative adversarial networks'
   ],
   install_requires=[
+    'einops>=0.3',
     'fire',
+    'retry',
     'torch',
-    'einops>=0.3'
+    'torchvision',
+    'tqdm'
   ],
   classifiers=[
     'Development Status :: 4 - Beta',
