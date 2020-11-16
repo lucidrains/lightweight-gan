@@ -1,9 +1,18 @@
+import sys
 from setuptools import setup, find_packages
+
+sys.path[0:0] = ['lightweight_gan']
+from version import __version__
 
 setup(
   name = 'lightweight-gan',
   packages = find_packages(),
-  version = '0.0.6',
+  entry_points={
+      'console_scripts': [
+          'lightweight_gan = lightweight_gan.cli:main',
+      ],
+  },
+  version = __version__,
   license='MIT',
   description = 'Lightweight GAN',
   author = 'Phil Wang',
@@ -15,6 +24,7 @@ setup(
     'generative adversarial networks'
   ],
   install_requires=[
+    'fire',
     'torch',
     'einops>=0.3'
   ],
