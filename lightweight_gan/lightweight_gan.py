@@ -204,7 +204,7 @@ class AugWrapper(nn.Module):
         super().__init__()
         self.D = D
 
-    def forward(self, images, prob = 0., types = [], detach = False):
+    def forward(self, images, prob = 0., types = [], detach = False, **kwargs):
         if random() < prob:
             images = random_hflip(images, prob=0.5)
             images = DiffAugment(images, types=types)
@@ -212,7 +212,7 @@ class AugWrapper(nn.Module):
         if detach:
             images = images.detach()
 
-        return self.D(images)
+        return self.D(images, **kwargs)
 
 # classes
 
@@ -413,7 +413,7 @@ class Discriminator(nn.Module):
         self.decoder1 = SimpleDecoder(chan_in = last_chan, chan_out = init_channel)
         self.decoder2 = SimpleDecoder(chan_in = features[-2][-1], chan_out = init_channel)
 
-    def forward(self, x):
+    def forward(self, x, calc_aux_loss = False):
         orig_img = x
 
         for layer in self.non_residual_layers:
@@ -425,7 +425,10 @@ class Discriminator(nn.Module):
             x = layer(x) + residual_layer(x)
             layer_outputs.append(x)
 
-        out = self.to_logits(x)
+        out = self.to_logits(x).flatten(1)
+
+        if not calc_aux_loss:
+            return out, None
 
         # self-supervised auto-encoding loss
 
@@ -452,7 +455,7 @@ class Discriminator(nn.Module):
 
         aux_loss = aux_loss1 + aux_loss2
 
-        return out.flatten(1), aux_loss
+        return out, aux_loss
 
 class LightweightGAN(nn.Module):
     def __init__(
@@ -673,11 +676,11 @@ class Trainer():
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
 
             generated_images = G(latents)
-            fake_output, fake_aux_loss = D_aug(generated_images.clone().detach(), detach = True, **aug_kwargs)
+            fake_output, fake_aux_loss = D_aug(generated_images.clone().detach(), detach = True, calc_aux_loss = True, **aug_kwargs)
 
             image_batch = next(self.loader).cuda(self.rank)
             image_batch.requires_grad_()
-            real_output, real_aux_loss = D_aug(image_batch, **aug_kwargs)
+            real_output, real_aux_loss = D_aug(image_batch,  calc_aux_loss = True, **aug_kwargs)
 
             real_output_loss = real_output
             fake_output_loss = fake_output
