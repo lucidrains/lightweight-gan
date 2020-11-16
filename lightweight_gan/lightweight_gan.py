@@ -1,7 +1,8 @@
 import torch
+from torch.optim import Adam
+import torch.nn.functional as F
 from random import random
 from math import log2, floor
-import torch.nn.functional as F
 from functools import partial
 from torch import nn, einsum
 from einops import rearrange
@@ -13,6 +14,10 @@ def exists(val):
 
 def default(val, d):
     return val if exists(val) else d
+
+def set_requires_grad(model, bool):
+    for p in model.parameters():
+        p.requires_grad = bool
 
 # classes
 
@@ -244,7 +249,25 @@ class Discriminator(nn.Module):
         return out.flatten(1), aux_loss
 
 class LightweightGAN(nn.Module):
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        latent_dim,
+        image_size,
+        fmap_max = 512,
+        fmap_inverse_coef = 12,
+        lr = 1e-4
+    ):
         super().__init__()
+        G_kwargs = dict(image_size = image_size, latent_dim = latent_dim, fmap_max = fmap_max, fmap_inverse_coef = fmap_inverse_coef)
+        self.G = Generator(**G_kwargs)
+        self.GE = Generator(**G_kwargs)
+        set_requires_grad(self.GE, False)
+
+        self.D = Discriminator(image_size = image_size, fmap_max = fmap_max, fmap_inverse_coef = fmap_inverse_coef)
+
+        self.G_opt = Adam(self.G.parameters(), lr = lr, betas=(0.5, 0.9))
+        self.D_opt = Adam(self.D.parameters(), lr = lr * 2, betas=(0.5, 0.9))
+
     def forward(self, x):
-        return x
+        raise NotImplemented
