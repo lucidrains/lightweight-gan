@@ -165,11 +165,13 @@ class Generator(nn.Module):
         image_size,
         latent_dim = 256,
         fmap_max = 512,
-        fmap_inverse_coef = 12
+        fmap_inverse_coef = 12,
+        transparent = False,
     ):
         super().__init__()
         resolution = log2(image_size)
         assert resolution.is_integer(), 'image size must be a power of 2'
+        init_channel = 4 if transparent else 3
         fmap_max = default(fmap_max, latent_dim)
 
         self.initial_conv = nn.Sequential(
@@ -216,7 +218,7 @@ class Generator(nn.Module):
             ])
             self.layers.append(layer)
 
-        self.out_conv = nn.Conv2d(features[-1], 3, 3, padding = 1)
+        self.out_conv = nn.Conv2d(features[-1], init_channel, 3, padding = 1)
 
     def forward(self, x):
         x = rearrange(x, 'b c -> b c () ()')
@@ -242,15 +244,17 @@ class SimpleDecoder(nn.Module):
         self,
         *,
         chan_in,
+        chan_out = 3,
         num_upsamples = 4
     ):
         super().__init__()
         self.layers = nn.ModuleList([])
-
+        final_chan = chan_out
         chans = chan_in
+
         for ind in range(num_upsamples):
             last_layer = ind == (num_upsamples - 1)
-            chan_out = chans if not last_layer else 3 * 2
+            chan_out = chans if not last_layer else final_chan * 2
             layer = nn.Sequential(
                 nn.Upsample(scale_factor = 2),
                 nn.Conv2d(chans, chan_out, 3, padding = 1),
@@ -271,11 +275,13 @@ class Discriminator(nn.Module):
         *,
         image_size,
         fmap_max = 512,
-        fmap_inverse_coef = 12
+        fmap_inverse_coef = 12,
+        transparent = False
     ):
         super().__init__()
         resolution = log2(image_size)
         assert resolution.is_integer(), 'image size must be a power of 2'
+        init_channel = 4 if transparent else 3
 
         num_non_residual_layers = max(0, int(resolution) - 8)
         num_residual_layers = 8 - 3
@@ -288,10 +294,10 @@ class Discriminator(nn.Module):
         for ind in range(num_non_residual_layers):
             first_layer = ind == 0
             last_layer = ind == (num_non_residual_layers - 1)
-            chan_out = features[0][-1] if last_layer else 3
+            chan_out = features[0][-1] if last_layer else init_channel
 
             self.non_residual_layers.append(nn.Sequential(
-                nn.Conv2d(3, chan_out, 4, stride = 2, padding = 1),
+                nn.Conv2d(init_channel, chan_out, 4, stride = 2, padding = 1),
                 nn.BatchNorm2d(3) if not first_layer else nn.Identity(),
                 nn.LeakyReLU(0.1)
             ))
@@ -323,8 +329,8 @@ class Discriminator(nn.Module):
             nn.Conv2d(last_chan, 1, 4)
         )
 
-        self.decoder1 = SimpleDecoder(chan_in = last_chan)
-        self.decoder2 = SimpleDecoder(chan_in = features[-2][-1])
+        self.decoder1 = SimpleDecoder(chan_in = last_chan, chan_out = init_channel)
+        self.decoder2 = SimpleDecoder(chan_in = features[-2][-1], chan_out = init_channel)
 
     def forward(self, x):
         orig_img = x
@@ -375,23 +381,25 @@ class LightweightGAN(nn.Module):
         image_size,
         fmap_max = 512,
         fmap_inverse_coef = 12,
+        transparent = False,
+        ttur_mult = 1.5,
         lr = 2e-4
     ):
         super().__init__()
         self.latent_dim = latent_dim
         self.image_size = image_size
 
-        G_kwargs = dict(image_size = image_size, latent_dim = latent_dim, fmap_max = fmap_max, fmap_inverse_coef = fmap_inverse_coef)
+        G_kwargs = dict(image_size = image_size, latent_dim = latent_dim, fmap_max = fmap_max, fmap_inverse_coef = fmap_inverse_coef, transparent = transparent)
         self.G = Generator(**G_kwargs)
 
         self.ema_updater = EMA(0.995)
         self.GE = Generator(**G_kwargs)
         set_requires_grad(self.GE, False)
 
-        self.D = Discriminator(image_size = image_size, fmap_max = fmap_max, fmap_inverse_coef = fmap_inverse_coef)
+        self.D = Discriminator(image_size = image_size, fmap_max = fmap_max, fmap_inverse_coef = fmap_inverse_coef, transparent = transparent)
 
         self.G_opt = Adam(self.G.parameters(), lr = lr, betas=(0.5, 0.9))
-        self.D_opt = Adam(self.D.parameters(), lr = lr * 2, betas=(0.5, 0.9))
+        self.D_opt = Adam(self.D.parameters(), lr = lr * ttur_mult, betas=(0.5, 0.9))
 
         self.cuda()
 
