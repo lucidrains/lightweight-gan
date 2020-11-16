@@ -47,6 +47,50 @@ CALC_FID_NUM_IMAGES = 12800
 def exists(val):
     return val is not None
 
+class MishFn(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        x_tanh_sp = torch.nn.functional.softplus(x).tanh()
+        if x.requires_grad:
+            ctx.save_for_backward(x_tanh_sp + x * x.sigmoid() * (1 - x_tanh_sp.square()))
+        y = x * x_tanh_sp
+        return y
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if len(ctx.saved_tensors) == 0:
+            return None
+        grad, = ctx.saved_tensors
+        return grad_output * grad
+    
+    
+class SwishFn(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, i):
+        with torch.no_grad():
+            sigmoid_i = i.sigmoid()
+            result = i * sigmoid_i
+            if i.requires_grad:
+                grad = sigmoid_i + result * (1 - sigmoid_i)
+                ctx.save_for_backward(grad)
+        result.requires_grad_(i.requires_grad)
+        return result
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        grad, = ctx.saved_tensors
+        return grad_output * grad
+
+def select_activation(name):
+    return {'swish': SwishFn.apply,
+            'mish': MishFn.apply,
+            'elu': torch.nn.functional.elu,
+            'relu': torch.nn.functional.relu,
+            'gelu': torch.nn.functional.gelu,
+            'leaky_relu': torch.nn.functional.leaky_relu
+           }[name.lower()]
+    
+
 @contextmanager
 def null_context():
     yield
