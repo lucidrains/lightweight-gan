@@ -398,7 +398,7 @@ class Discriminator(nn.Module):
             self.non_residual_layers.append(nn.Sequential(
                 nn.Conv2d(init_channel, chan_out, 4, stride = 2, padding = 1),
                 nn.BatchNorm2d(init_channel) if not first_layer else nn.Identity(),
-                nn.LeakyReLU(0.1, inplace = True)
+                nn.LeakyReLU(0.1)
             ))
 
         self.residual_layers = nn.ModuleList([])
@@ -416,16 +416,16 @@ class Discriminator(nn.Module):
                 nn.Sequential(
                     nn.Conv2d(chan_in, chan_out, 4, stride = 2, padding = 1),
                     nn.BatchNorm2d(chan_out),
-                    nn.LeakyReLU(0.1, inplace = True),
+                    nn.LeakyReLU(0.1),
                     nn.Conv2d(chan_out, chan_out, 3, padding = 1),
                     nn.BatchNorm2d(chan_out),
-                    nn.LeakyReLU(0.1, inplace = True)
+                    nn.LeakyReLU(0.1)
                 ),
                 nn.Sequential(
                     nn.AvgPool2d(2),
                     nn.Conv2d(chan_in, chan_out, 1),
                     nn.BatchNorm2d(chan_out),
-                    nn.LeakyReLU(0.1, inplace = True)
+                    nn.LeakyReLU(0.1)
                 ),
                 hamburger
             ]))
