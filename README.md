@@ -16,6 +16,10 @@ $ pip install lightweight-gan
 $ lightweight_gan --data ./path/to/images --image-size 512
 ```
 
+## Status
+
+512x512 Oxford flowers in progress, results pending. Feel free to try yourself in the interim.
+
 ## Citations
 
 ```bibtex
