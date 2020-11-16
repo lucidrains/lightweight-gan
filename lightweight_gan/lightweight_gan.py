@@ -160,6 +160,9 @@ def resize_to_minimum_size(min_size, image):
         return torchvision.transforms.functional.resize(image, min_size)
     return image
 
+def normalize_image(image):
+    return (image * 2) - 1
+
 class ImageDataset(Dataset):
     def __init__(self, folder, image_size, transparent = False, aug_prob = 0.):
         super().__init__()
@@ -177,7 +180,8 @@ class ImageDataset(Dataset):
             transforms.Resize(image_size),
             RandomApply(aug_prob, transforms.RandomResizedCrop(image_size, scale=(0.5, 1.0), ratio=(0.98, 1.02)), transforms.CenterCrop(image_size)),
             transforms.ToTensor(),
-            transforms.Lambda(expand_greyscale(transparent))
+            transforms.Lambda(expand_greyscale(transparent)),
+            transforms.Lambda(normalize_image)
         ])
 
     def __len__(self):
@@ -821,7 +825,7 @@ class Trainer():
     @torch.no_grad()
     def generate_truncated(self, G, style, trunc_psi = 0.75, num_image_tiles = 8):
         generated_images = evaluate_in_chunks(self.batch_size, G, style)
-        return generated_images
+        return (generated_images + 1) * 0.5
 
     @torch.no_grad()
     def generate_interpolation(self, num = 0, num_image_tiles = 8, trunc = 1.0, num_steps = 100, save_frames = False):

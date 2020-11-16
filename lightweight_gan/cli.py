@@ -88,7 +88,7 @@ def train_from_folder(
     num_image_tiles = 8,
     trunc_psi = 0.75,
     aug_prob = 0.,
-    aug_types = ['translation', 'cutout'],
+    aug_types = ['cutout', 'color'],
     dataset_aug_prob = 0.,
     multi_gpus = False,
     calculate_fid_every = None,
