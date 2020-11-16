@@ -571,12 +571,9 @@ class Trainer():
         self.GAN.D_opt.zero_grad()
 
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[D_aug, G]):
-            get_latents_fn = mixed_list if random() < self.mixed_prob else noise_list
-            style = get_latents_fn(batch_size, num_layers, latent_dim, device=self.rank)
+            latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
 
-            w_styles = styles_def_to_tensor(w_space)
-
-            generated_images = G(w_styles, noise)
+            generated_images = G(w_styles)
             fake_output, fake_q_loss = D_aug(generated_images.clone().detach(), detach = True, **aug_kwargs)
 
             image_batch = next(self.loader).cuda(self.rank)
@@ -609,11 +606,8 @@ class Trainer():
         self.GAN.G_opt.zero_grad()
 
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[G, D_aug]):
-            style = get_latents_fn(batch_size, num_layers, latent_dim, device=self.rank)
-
-            w_styles = styles_def_to_tensor(w_space)
-
-            generated_images = G(w_styles, noise)
+            latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
+            generated_images = G(latents)
             fake_output, _ = D_aug(generated_images, **aug_kwargs)
             fake_output_loss = fake_output
 
@@ -667,6 +661,7 @@ class Trainer():
     @torch.no_grad()
     def evaluate(self, num = 0, num_image_tiles = 8, trunc = 1.0):
         self.GAN.eval()
+
         ext = self.image_extension
         num_rows = num_image_tiles
     
@@ -675,7 +670,7 @@ class Trainer():
 
         # latents and noise
 
-        latents = noise_list(num_rows ** 2, num_layers, latent_dim, device=self.rank)
+        latents = torch.randn(num_rows ** 2, latent_dim).cuda(self.rank)
 
         # regular
 
@@ -714,7 +709,7 @@ class Trainer():
 
         for batch_num in tqdm(range(num_batches), desc='calculating FID - saving generated'):
             # latents and noise
-            latents = noise_list(self.batch_size, num_layers, latent_dim, device=self.rank)
+            latents = torch.randn(self.batch_size, latent_dim).cuda(self.rank)
 
             # moving averages
             generated_images = self.generate_truncated(self.GAN.GE, latents, trunc_psi = self.trunc_psi)
@@ -740,8 +735,8 @@ class Trainer():
 
         # latents and noise
 
-        latents_low = noise(num_rows ** 2, latent_dim, device=self.rank)
-        latents_high = noise(num_rows ** 2, latent_dim, device=self.rank)
+        latents_low = torch.randn(num_rows ** 2, latent_dim).cuda(self.rank)
+        latents_high = torch.randn(num_rows ** 2, latent_dim).cuda(self.rank)
 
         ratios = torch.linspace(0., 8., num_steps)
 
@@ -749,12 +744,12 @@ class Trainer():
         for ratio in tqdm(ratios):
             interp_latents = slerp(ratio, latents_low, latents_high)
             latents = [(interp_latents, num_layers)]
-            generated_images = self.generate_truncated(self.GAN.GE, latents, n, trunc_psi = self.trunc_psi)
+            generated_images = self.generate_truncated(self.GAN.GE, latents, trunc_psi = self.trunc_psi)
             images_grid = torchvision.utils.make_grid(generated_images, nrow = num_rows)
             pil_image = transforms.ToPILImage()(images_grid.cpu())
             
             if self.transparent:
-                background = Image.new("RGBA", pil_image.size, (255, 255, 255))
+                background = Image.new('RGBA', pil_image.size, (255, 255, 255))
                 pil_image = Image.alpha_composite(background, pil_image)
                 
             frames.append(pil_image)
