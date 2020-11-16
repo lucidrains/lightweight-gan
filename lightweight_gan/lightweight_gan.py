@@ -14,6 +14,8 @@ from torch import nn, einsum
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torch.autograd import grad as torch_grad
+from torch.utils.data.distributed import DistributedSampler
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 from PIL import Image
 import torchvision
@@ -48,6 +50,13 @@ def exists(val):
 def null_context():
     yield
 
+def combine_contexts(contexts):
+    @contextmanager
+    def multi_contexts():
+        with ExitStack() as stack:
+            yield [stack.enter_context(ctx()) for ctx in contexts]
+    return multi_contexts
+
 def default(val, d):
     return val if exists(val) else d
 
@@ -67,7 +76,7 @@ def raise_if_nan(t):
 def gradient_penalty(images, outputs, weight = 10):
     batch_size = images.shape[0]
     gradients = torch_grad(outputs=outputs, inputs=images,
-                           grad_outputs=list(map(lambda t: torch.ones(t.size()).cuda(), outputs)),
+                           grad_outputs=list(map(lambda t: torch.ones(t.size(), device = images.device), outputs)),
                            create_graph=True, retain_graph=True, only_inputs=True)[0]
 
     gradients = gradients.reshape(batch_size, -1)
@@ -668,8 +677,7 @@ class Trainer():
         )
 
         if self.is_ddp:
-            ddp_kwargs = {'device_ids': [self.rank]}
-            self.S_ddp = DDP(self.GAN.S, **ddp_kwargs)
+            ddp_kwargs = {'device_ids': [self.rank], 'broadcast_buffers': False, 'find_unused_parameters': True}
             self.G_ddp = DDP(self.GAN.G, **ddp_kwargs)
             self.D_ddp = DDP(self.GAN.D, **ddp_kwargs)
             self.D_aug_ddp = DDP(self.GAN.D_aug, **ddp_kwargs)
