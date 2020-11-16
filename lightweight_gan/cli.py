@@ -83,7 +83,7 @@ def train_from_folder(
     evaluate_every = 1000,
     generate = False,
     generate_interpolation = False,
-    hamburger_res_layers = [],
+    hamburger_res_layers = [32],
     use_evonorm = False,
     interpolation_num_steps = 100,
     save_frames = False,
