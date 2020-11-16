@@ -8,9 +8,9 @@ setup(
   name = 'lightweight-gan',
   packages = find_packages(),
   entry_points={
-      'console_scripts': [
-          'lightweight_gan = lightweight_gan.cli:main',
-      ],
+    'console_scripts': [
+      'lightweight_gan = lightweight_gan.cli:main',
+    ],
   },
   version = __version__,
   license='MIT',
@@ -26,6 +26,9 @@ setup(
   install_requires=[
     'einops>=0.3',
     'fire',
+    'numpy',
+    'pillow',
+    'pytorch-fid',
     'retry',
     'torch',
     'torchvision',

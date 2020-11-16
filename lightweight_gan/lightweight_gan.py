@@ -1,16 +1,22 @@
-import torch
-from torch.optim import Adam
-import torch.nn.functional as F
-from torch.utils.data import Dataset
-
 import multiprocessing
 from random import random
 from math import log2, floor
 from functools import partial
-from torch import nn, einsum
-from einops import rearrange
 
+import torch
+from torch.optim import Adam
+from torch import nn, einsum
+import torch.nn.functional as F
+from torch.utils.data import Dataset
+
+import torchvision
+from torchvision import transforms
+
+from lightweight_gan.diff_augment import DiffAugment
 from lightweight_gan.version import __version__
+
+from einops import rearrange
+from pytorch_fid import fid_score
 
 # asserts
 
