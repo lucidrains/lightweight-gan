@@ -1,11 +1,21 @@
 import torch
 from torch.optim import Adam
 import torch.nn.functional as F
+
+import multiprocessing
 from random import random
 from math import log2, floor
 from functools import partial
 from torch import nn, einsum
 from einops import rearrange
+
+# asserts
+
+assert torch.cuda.is_available(), 'You need to have an Nvidia GPU with CUDA installed.'
+
+# constants
+
+NUM_CORES = multiprocessing.cpu_count()
 
 # helpers
 
@@ -268,6 +278,8 @@ class LightweightGAN(nn.Module):
 
         self.G_opt = Adam(self.G.parameters(), lr = lr, betas=(0.5, 0.9))
         self.D_opt = Adam(self.D.parameters(), lr = lr * 2, betas=(0.5, 0.9))
+
+        self.cuda()
 
     def forward(self, x):
         raise NotImplemented
