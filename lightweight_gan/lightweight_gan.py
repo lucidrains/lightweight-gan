@@ -26,6 +26,8 @@ from tqdm import tqdm
 from einops import rearrange
 from pytorch_fid import fid_score
 
+from hamburger_pytorch import Hamburger
+
 # asserts
 
 assert torch.cuda.is_available(), 'You need to have an Nvidia GPU with CUDA installed.'
@@ -243,6 +245,7 @@ class Generator(nn.Module):
         fmap_max = 512,
         fmap_inverse_coef = 12,
         transparent = False,
+        hamburger_res_layers = []
     ):
         super().__init__()
         resolution = log2(image_size)
@@ -273,6 +276,15 @@ class Generator(nn.Module):
         self.sle_map = dict(self.sle_map)
 
         for (resolution, (chan_in, chan_out)) in zip(self.res_layers, in_out_features):
+            image_width = 2 ** resolution
+
+            hamburger = None
+            if image_width in hamburger_res_layers:
+                hamburger = Hamburger(
+                    dim = chan_in,
+                    n = image_width ** 2
+                )
+
             sle = None
             if resolution in self.sle_map:
                 residual_layer = self.sle_map[resolution]
@@ -290,7 +302,8 @@ class Generator(nn.Module):
                     nn.BatchNorm2d(chan_out * 2),
                     nn.GLU(dim = 1)
                 ),
-                sle
+                sle,
+                hamburger
             ])
             self.layers.append(layer)
 
@@ -302,8 +315,12 @@ class Generator(nn.Module):
 
         residuals = dict()
 
-        for (res, (up, sle)) in zip(self.res_layers, self.layers):
+        for (res, (up, sle, hamburger)) in zip(self.res_layers, self.layers):
+            if exists(hamburger):
+                x = hamburger(x) + x
+
             x = up(x)
+
             if exists(sle):
                 out_res = self.sle_map[res]
                 residual = sle(x)
@@ -352,7 +369,8 @@ class Discriminator(nn.Module):
         image_size,
         fmap_max = 512,
         fmap_inverse_coef = 12,
-        transparent = False
+        transparent = False,
+        hamburger_res_layers = []
     ):
         super().__init__()
         resolution = log2(image_size)
@@ -379,27 +397,37 @@ class Discriminator(nn.Module):
 
             self.non_residual_layers.append(nn.Sequential(
                 nn.Conv2d(init_channel, chan_out, 4, stride = 2, padding = 1),
-                nn.BatchNorm2d(3) if not first_layer else nn.Identity(),
-                nn.LeakyReLU(0.1)
+                nn.BatchNorm2d(init_channel) if not first_layer else nn.Identity(),
+                nn.LeakyReLU(0.1, inplace = True)
             ))
 
         self.residual_layers = nn.ModuleList([])
-        for (_, chan_in), (_, chan_out) in chan_in_out:
+        for (res, ((_, chan_in), (_, chan_out))) in zip(range(8, 2, -1), chan_in_out):
+            image_width = 2 ** resolution
+
+            hamburger = None
+            if image_width in hamburger_res_layers:
+                hamburger = Hamburger(
+                    dim = chan_in,
+                    n = image_width ** 2
+                )
+
             self.residual_layers.append(nn.ModuleList([
                 nn.Sequential(
                     nn.Conv2d(chan_in, chan_out, 4, stride = 2, padding = 1),
                     nn.BatchNorm2d(chan_out),
-                    nn.LeakyReLU(0.1),
+                    nn.LeakyReLU(0.1, inplace = True),
                     nn.Conv2d(chan_out, chan_out, 3, padding = 1),
                     nn.BatchNorm2d(chan_out),
-                    nn.LeakyReLU(0.1)
+                    nn.LeakyReLU(0.1, inplace = True)
                 ),
                 nn.Sequential(
                     nn.AvgPool2d(2),
                     nn.Conv2d(chan_in, chan_out, 1),
                     nn.BatchNorm2d(chan_out),
-                    nn.LeakyReLU(0.1)
+                    nn.LeakyReLU(0.1, inplace = True)
                 ),
+                hamburger
             ]))
 
         last_chan = features[-1][-1]
@@ -421,7 +449,10 @@ class Discriminator(nn.Module):
 
         layer_outputs = []
 
-        for (layer, residual_layer) in self.residual_layers:
+        for (layer, residual_layer, hamburger) in self.residual_layers:
+            if exists(hamburger):
+                x = hamburger(x) + x
+
             x = layer(x) + residual_layer(x)
             layer_outputs.append(x)
 
@@ -468,20 +499,36 @@ class LightweightGAN(nn.Module):
         transparent = False,
         ttur_mult = 1.5,
         lr = 2e-4,
-        rank = 0
+        rank = 0,
+        hamburger_res_layers = []
     ):
         super().__init__()
         self.latent_dim = latent_dim
         self.image_size = image_size
 
-        G_kwargs = dict(image_size = image_size, latent_dim = latent_dim, fmap_max = fmap_max, fmap_inverse_coef = fmap_inverse_coef, transparent = transparent)
+        G_kwargs = dict(
+            image_size = image_size,
+            latent_dim = latent_dim,
+            fmap_max = fmap_max,
+            fmap_inverse_coef = fmap_inverse_coef,
+            transparent = transparent,
+            hamburger_res_layers = hamburger_res_layers
+        )
+
         self.G = Generator(**G_kwargs)
 
         self.ema_updater = EMA(0.995)
         self.GE = Generator(**G_kwargs)
         set_requires_grad(self.GE, False)
 
-        self.D = Discriminator(image_size = image_size, fmap_max = fmap_max, fmap_inverse_coef = fmap_inverse_coef, transparent = transparent)
+        self.D = Discriminator(
+            image_size = image_size,
+            fmap_max = fmap_max,
+            fmap_inverse_coef = fmap_inverse_coef,
+            transparent = transparent,
+            hamburger_res_layers = hamburger_res_layers
+        )
+
         self.D_aug = AugWrapper(self.D, image_size)
 
         self.G_opt = Adam(self.G.parameters(), lr = lr, betas=(0.5, 0.9))
@@ -527,6 +574,7 @@ class Trainer():
         batch_size = 4,
         mixed_prob = 0.9,
         gradient_accumulate_every = 1,
+        hamburger_res_layers = [],
         lr = 2e-4,
         lr_mlp = 1.,
         ttur_mult = 2,
@@ -575,6 +623,8 @@ class Trainer():
 
         self.gradient_accumulate_every = gradient_accumulate_every
 
+        self.hamburger_res_layers = hamburger_res_layers
+
         self.d_loss = 0
         self.g_loss = 0
         self.last_gp_loss = None
@@ -607,6 +657,7 @@ class Trainer():
         self.GAN = LightweightGAN(
             lr = self.lr,
             latent_dim = self.latent_dim,
+            hamburger_res_layers = self.hamburger_res_layers,
             image_size = self.image_size,
             ttur_mult = self.ttur_mult,
             fmap_max = self.fmap_max,

@@ -26,6 +26,7 @@ setup(
   install_requires=[
     'einops>=0.3',
     'fire',
+    'hamburger-pytorch',
     'numpy',
     'pillow',
     'pytorch-fid',
