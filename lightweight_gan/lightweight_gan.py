@@ -29,6 +29,17 @@ def set_requires_grad(model, bool):
     for p in model.parameters():
         p.requires_grad = bool
 
+# helper classes
+
+class EMA():
+    def __init__(self, beta):
+        super().__init__()
+        self.beta = beta
+    def update_average(self, old, new):
+        if not exists(old):
+            return new
+        return old * self.beta + (1 - self.beta) * new
+
 # classes
 
 class SLE(nn.Module):
@@ -271,6 +282,8 @@ class LightweightGAN(nn.Module):
         super().__init__()
         G_kwargs = dict(image_size = image_size, latent_dim = latent_dim, fmap_max = fmap_max, fmap_inverse_coef = fmap_inverse_coef)
         self.G = Generator(**G_kwargs)
+
+        self.ema_updater = EMA(0.995)
         self.GE = Generator(**G_kwargs)
         set_requires_grad(self.GE, False)
 
@@ -280,6 +293,17 @@ class LightweightGAN(nn.Module):
         self.D_opt = Adam(self.D.parameters(), lr = lr * 2, betas=(0.5, 0.9))
 
         self.cuda()
+
+    def EMA(self):
+        def update_moving_average(ma_model, current_model):
+            for current_params, ma_params in zip(current_model.parameters(), ma_model.parameters()):
+                old_weight, up_weight = ma_params.data, current_params.data
+                ma_params.data = self.ema_updater.update_average(old_weight, up_weight)
+
+        update_moving_average(self.GE, self.G)
+
+    def reset_parameter_averaging(self):
+        self.GE.load_state_dict(self.G.state_dict())
 
     def forward(self, x):
         raise NotImplemented
