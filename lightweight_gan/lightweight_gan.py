@@ -378,6 +378,9 @@ class LightweightGAN(nn.Module):
         lr = 2e-4
     ):
         super().__init__()
+        self.latent_dim = latent_dim
+        self.image_size = image_size
+
         G_kwargs = dict(image_size = image_size, latent_dim = latent_dim, fmap_max = fmap_max, fmap_inverse_coef = fmap_inverse_coef)
         self.G = Generator(**G_kwargs)
 
@@ -499,8 +502,8 @@ class Trainer():
 
         self.GAN = LightweightGAN(
             lr = self.lr,
-            ttur_mult = self.ttur_mult,
             image_size = self.image_size,
+            ttur_mult = self.ttur_mult,
             fmap_max = self.fmap_max,
             transparent = self.transparent,
             rank = self.rank,
@@ -549,33 +552,28 @@ class Trainer():
 
         batch_size = math.ceil(self.batch_size / self.world_size)
 
-        image_size = self.GAN.G.image_size
-        latent_dim = self.GAN.G.latent_dim
-        num_layers = self.GAN.G.num_layers
+        image_size = self.GAN.image_size
+        latent_dim = self.GAN.latent_dim
 
         aug_prob   = self.aug_prob
         aug_types  = self.aug_types
         aug_kwargs = {'prob': aug_prob, 'types': aug_types}
 
         apply_gradient_penalty = self.steps % 4 == 0
-        apply_cl_reg_to_generated = self.steps > 20000
 
         G = self.GAN.G if not self.is_ddp else self.G_ddp
         D = self.GAN.D if not self.is_ddp else self.D_ddp
         D_aug = self.GAN.D_aug if not self.is_ddp else self.D_aug_ddp
-
-        backwards = partial(loss_backwards, self.fp16)
 
         # train discriminator
 
         avg_pl_length = self.pl_mean
         self.GAN.D_opt.zero_grad()
 
-        for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[D_aug, S, G]):
+        for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[D_aug, G]):
             get_latents_fn = mixed_list if random() < self.mixed_prob else noise_list
             style = get_latents_fn(batch_size, num_layers, latent_dim, device=self.rank)
 
-            w_space = latent_to_w(S, style)
             w_styles = styles_def_to_tensor(w_space)
 
             generated_images = G(w_styles, noise)
@@ -598,7 +596,7 @@ class Trainer():
 
             disc_loss = disc_loss / self.gradient_accumulate_every
             disc_loss.register_hook(raise_if_nan)
-            backwards(disc_loss, self.GAN.D_opt, loss_id = 1)
+            disc_loss.backwards()
 
             total_disc_loss += divergence.detach().item() / self.gradient_accumulate_every
 
@@ -610,10 +608,9 @@ class Trainer():
 
         self.GAN.G_opt.zero_grad()
 
-        for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[S, G, D_aug]):
+        for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[G, D_aug]):
             style = get_latents_fn(batch_size, num_layers, latent_dim, device=self.rank)
 
-            w_space = latent_to_w(S, style)
             w_styles = styles_def_to_tensor(w_space)
 
             generated_images = G(w_styles, noise)
@@ -625,7 +622,7 @@ class Trainer():
 
             gen_loss = gen_loss / self.gradient_accumulate_every
             gen_loss.register_hook(raise_if_nan)
-            backwards(gen_loss, self.GAN.G_opt, loss_id = 2)
+            gen_loss.backwards()
 
             total_gen_loss += loss.detach().item() / self.gradient_accumulate_every
 
@@ -666,7 +663,6 @@ class Trainer():
                     f.write(f'{self.steps},{fid}\n')
 
         self.steps += 1
-        self.av = None
 
     @torch.no_grad()
     def evaluate(self, num = 0, num_image_tiles = 8, trunc = 1.0):
@@ -674,8 +670,8 @@ class Trainer():
         ext = self.image_extension
         num_rows = num_image_tiles
     
-        latent_dim = self.GAN.G.latent_dim
-        image_size = self.GAN.G.image_size
+        latent_dim = self.GAN.latent_dim
+        image_size = self.GAN.image_size
 
         # latents and noise
 
@@ -683,12 +679,12 @@ class Trainer():
 
         # regular
 
-        generated_images = self.generate_truncated(self.GAN.G, latents, n, trunc_psi = self.trunc_psi)
+        generated_images = self.generate_truncated(self.GAN.G, latents, trunc_psi = self.trunc_psi)
         torchvision.utils.save_image(generated_images, str(self.results_dir / self.name / f'{str(num)}.{ext}'), nrow=num_rows)
         
         # moving averages
 
-        generated_images = self.generate_truncated(self.GAN.GE, latents, n, trunc_psi = self.trunc_psi)
+        generated_images = self.generate_truncated(self.GAN.GE, latents, trunc_psi = self.trunc_psi)
         torchvision.utils.save_image(generated_images, str(self.results_dir / self.name / f'{str(num)}-ema.{ext}'), nrow=num_rows)
 
     @torch.no_grad()
@@ -713,9 +709,8 @@ class Trainer():
         self.GAN.eval()
         ext = self.image_extension
 
-        latent_dim = self.GAN.G.latent_dim
-        image_size = self.GAN.G.image_size
-        num_layers = self.GAN.G.num_layers
+        latent_dim = self.GAN.latent_dim
+        image_size = self.GAN.image_size
 
         for batch_num in tqdm(range(num_batches), desc='calculating FID - saving generated'):
             # latents and noise
@@ -740,9 +735,8 @@ class Trainer():
         ext = self.image_extension
         num_rows = num_image_tiles
 
-        latent_dim = self.GAN.G.latent_dim
-        image_size = self.GAN.G.image_size
-        num_layers = self.GAN.G.num_layers
+        latent_dim = self.GAN.latent_dim
+        image_size = self.GAN.image_size
 
         # latents and noise
 
