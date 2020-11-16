@@ -306,7 +306,7 @@ class Generator(nn.Module):
                 residuals[out_res] = residual
 
             if res in residuals:
-                x = x + residuals[res]
+                x = x * residuals[res]
 
         x = self.out_conv(x)
         return x.tanh()
