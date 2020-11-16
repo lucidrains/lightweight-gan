@@ -13,7 +13,7 @@ $ pip install lightweight-gan
 ## Usage
 
 ```bash
-$ lightweight_gan --data ./path/to/images --image-size 512
+$ lightweight_gan --data ./path/to/images --image-size 512 --aug-prob 0.2
 ```
 
 ## Status
