@@ -23,6 +23,7 @@ from torchvision import transforms
 
 from lightweight_gan.diff_augment import DiffAugment
 from lightweight_gan.version import __version__
+from lightweight_gan.evonorm import EvoNorm2d
 
 from tqdm import tqdm
 from einops import rearrange
@@ -254,7 +255,8 @@ class Generator(nn.Module):
         fmap_max = 512,
         fmap_inverse_coef = 12,
         transparent = False,
-        hamburger_res_layers = []
+        hamburger_res_layers = [],
+        use_evonorm = False
     ):
         super().__init__()
         resolution = log2(image_size)
@@ -262,9 +264,11 @@ class Generator(nn.Module):
         init_channel = 4 if transparent else 3
         fmap_max = default(fmap_max, latent_dim)
 
+        norm_class = EvoNorm2d if use_evonorm else nn.BatchNorm2d
+
         self.initial_conv = nn.Sequential(
             nn.ConvTranspose2d(latent_dim, latent_dim * 2, 4),
-            nn.BatchNorm2d(latent_dim * 2),
+            norm_class(latent_dim * 2),
             nn.GLU(dim = 1)
         )
 
@@ -308,7 +312,7 @@ class Generator(nn.Module):
                 nn.Sequential(
                     nn.Upsample(scale_factor = 2),
                     nn.Conv2d(chan_in, chan_out * 2, 3, padding = 1),
-                    nn.BatchNorm2d(chan_out * 2),
+                    norm_class(chan_out * 2),
                     nn.GLU(dim = 1)
                 ),
                 sle,
@@ -347,9 +351,12 @@ class SimpleDecoder(nn.Module):
         *,
         chan_in,
         chan_out = 3,
-        num_upsamples = 4
+        num_upsamples = 4,
+        use_evonorm = False
     ):
         super().__init__()
+        norm_class = EvoNorm2d if use_evonorm else nn.BatchNorm2d
+
         self.layers = nn.ModuleList([])
         final_chan = chan_out
         chans = chan_in
@@ -360,7 +367,7 @@ class SimpleDecoder(nn.Module):
             layer = nn.Sequential(
                 nn.Upsample(scale_factor = 2),
                 nn.Conv2d(chans, chan_out, 3, padding = 1),
-                nn.BatchNorm2d(chan_out),
+                norm_class(chan_out),
                 nn.GLU(dim = 1)
             )
             self.layers.append(layer)
@@ -379,9 +386,12 @@ class Discriminator(nn.Module):
         fmap_max = 512,
         fmap_inverse_coef = 12,
         transparent = False,
-        hamburger_res_layers = []
+        hamburger_res_layers = [],
+        use_evonorm = False
     ):
         super().__init__()
+        norm_class = EvoNorm2d if use_evonorm else nn.BatchNorm2d
+
         resolution = log2(image_size)
         assert resolution.is_integer(), 'image size must be a power of 2'
         init_channel = 4 if transparent else 3
@@ -406,7 +416,7 @@ class Discriminator(nn.Module):
 
             self.non_residual_layers.append(nn.Sequential(
                 nn.Conv2d(init_channel, chan_out, 4, stride = 2, padding = 1),
-                nn.BatchNorm2d(init_channel) if not first_layer else nn.Identity(),
+                norm_class(chan_out) if not first_layer else nn.Identity(),
                 nn.LeakyReLU(0.1)
             ))
 
@@ -424,16 +434,16 @@ class Discriminator(nn.Module):
             self.residual_layers.append(nn.ModuleList([
                 nn.Sequential(
                     nn.Conv2d(chan_in, chan_out, 4, stride = 2, padding = 1),
-                    nn.BatchNorm2d(chan_out),
+                    norm_class(chan_out),
                     nn.LeakyReLU(0.1),
                     nn.Conv2d(chan_out, chan_out, 3, padding = 1),
-                    nn.BatchNorm2d(chan_out),
+                    norm_class(chan_out),
                     nn.LeakyReLU(0.1)
                 ),
                 nn.Sequential(
                     nn.AvgPool2d(2),
                     nn.Conv2d(chan_in, chan_out, 1),
-                    nn.BatchNorm2d(chan_out),
+                    norm_class(chan_out),
                     nn.LeakyReLU(0.1)
                 ),
                 hamburger
@@ -442,13 +452,13 @@ class Discriminator(nn.Module):
         last_chan = features[-1][-1]
         self.to_logits = nn.Sequential(
             nn.Conv2d(last_chan, last_chan, 1),
-            nn.BatchNorm2d(last_chan),
+            norm_class(last_chan),
             nn.LeakyReLU(0.1),
             nn.Conv2d(last_chan, 1, 4)
         )
 
-        self.decoder1 = SimpleDecoder(chan_in = last_chan, chan_out = init_channel)
-        self.decoder2 = SimpleDecoder(chan_in = features[-2][-1], chan_out = init_channel)
+        self.decoder1 = SimpleDecoder(chan_in = last_chan, chan_out = init_channel, use_evonorm = use_evonorm)
+        self.decoder2 = SimpleDecoder(chan_in = features[-2][-1], chan_out = init_channel, use_evonorm = use_evonorm)
 
     def forward(self, x, calc_aux_loss = False):
         orig_img = x
@@ -509,7 +519,8 @@ class LightweightGAN(nn.Module):
         ttur_mult = 1.5,
         lr = 2e-4,
         rank = 0,
-        hamburger_res_layers = []
+        hamburger_res_layers = [],
+        use_evonorm = False
     ):
         super().__init__()
         self.latent_dim = latent_dim
@@ -521,7 +532,8 @@ class LightweightGAN(nn.Module):
             fmap_max = fmap_max,
             fmap_inverse_coef = fmap_inverse_coef,
             transparent = transparent,
-            hamburger_res_layers = hamburger_res_layers
+            hamburger_res_layers = hamburger_res_layers,
+            use_evonorm = use_evonorm
         )
 
         self.G = Generator(**G_kwargs)
@@ -535,7 +547,8 @@ class LightweightGAN(nn.Module):
             fmap_max = fmap_max,
             fmap_inverse_coef = fmap_inverse_coef,
             transparent = transparent,
-            hamburger_res_layers = hamburger_res_layers
+            hamburger_res_layers = hamburger_res_layers,
+            use_evonorm = use_evonorm
         )
 
         self.D_aug = AugWrapper(self.D, image_size)
@@ -584,6 +597,7 @@ class Trainer():
         mixed_prob = 0.9,
         gradient_accumulate_every = 1,
         hamburger_res_layers = [],
+        use_evonorm = False,
         lr = 2e-4,
         lr_mlp = 1.,
         ttur_mult = 2,
@@ -632,6 +646,7 @@ class Trainer():
 
         self.gradient_accumulate_every = gradient_accumulate_every
 
+        self.use_evonorm = use_evonorm
         self.hamburger_res_layers = hamburger_res_layers
 
         self.d_loss = 0
@@ -667,6 +682,7 @@ class Trainer():
             lr = self.lr,
             latent_dim = self.latent_dim,
             hamburger_res_layers = self.hamburger_res_layers,
+            use_evonorm = self.use_evonorm,
             image_size = self.image_size,
             ttur_mult = self.ttur_mult,
             fmap_max = self.fmap_max,
@@ -689,12 +705,14 @@ class Trainer():
         config = self.config() if not self.config_path.exists() else json.loads(self.config_path.read_text())
         self.image_size = config['image_size']
         self.transparent = config['transparent']
+        self.use_evonorm = config['use_evonorm']
+        self.hamburger_res_layers = config['hamburger_res_layers']
         self.fmap_max = config.pop('fmap_max', 512)
         del self.GAN
         self.init_GAN()
 
     def config(self):
-        return {'image_size': self.image_size, 'transparent': self.transparent}
+        return {'image_size': self.image_size, 'transparent': self.transparent, 'use_evonorm': self.use_evonorm, 'hamburger_res_layers': self.hamburger_res_layers}
 
     def set_data_src(self, folder):
         self.dataset = ImageDataset(folder, self.image_size, transparent = self.transparent, aug_prob = self.dataset_aug_prob)
