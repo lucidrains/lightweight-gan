@@ -646,6 +646,10 @@ class LightweightGAN(nn.Module):
                 old_weight, up_weight = ma_params.data, current_params.data
                 ma_params.data = self.ema_updater.update_average(old_weight, up_weight)
 
+            for current_buffer, ma_buffer in zip(current_model.buffers(), ma_model.buffers()):
+                new_buffer_value = self.ema_updater.update_average(ma_buffer, current_buffer)
+                ma_buffer.copy_(new_buffer_value)
+
         update_moving_average(self.GE, self.G)
 
     def reset_parameter_averaging(self):
@@ -760,7 +764,7 @@ class Trainer():
         global norm_class
 
         activation_fn = select_activation(self.activation)
-        norm_class = nn.BatchNorm2d if not self.use_evonorm else lambda chans: EvoNorm2d(chans, groups = math.ceil(chans / 16)) if chans >= 64 else nn.Identity()
+        norm_class = nn.BatchNorm2d if not self.use_evonorm else lambda chans: EvoNorm2d(chans, groups = 32) if chans >= 64 else nn.Identity()
 
         # instantiate GAN
 
