@@ -1,3 +1,4 @@
+import os
 import json
 import multiprocessing
 from random import random
@@ -765,6 +766,15 @@ class Trainer():
         activation_fn = select_activation(self.activation)
         norm_class = nn.BatchNorm2d if not self.use_evonorm else lambda chans: EvoNorm2d(chans, groups = 32) if chans >= 64 else nn.Identity()
         norm_class = nn.SyncBatchNorm if not self.use_evonorm and self.syncbatchnorm else norm_class
+
+        # handle bugs when
+        # switching from multi-gpu back to single gpu
+
+        if self.syncbatchnorm and not self.is_ddp:
+            import torch.distributed as dist
+            os.environ['MASTER_ADDR'] = 'localhost'
+            os.environ['MASTER_PORT'] = '12355'
+            dist.init_process_group('nccl', rank=0, world_size=1)
 
         # instantiate GAN
 
