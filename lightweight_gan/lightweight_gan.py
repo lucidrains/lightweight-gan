@@ -14,6 +14,7 @@ from torch import nn, einsum
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torch.autograd import grad as torch_grad
+from torch.nn.utils import spectral_norm
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
@@ -72,15 +73,6 @@ def cycle(iterable):
 def raise_if_nan(t):
     if torch.isnan(t):
         raise NanException
-
-def gradient_penalty(images, outputs, weight = 10):
-    batch_size = images.shape[0]
-    gradients = torch_grad(outputs=outputs, inputs=images,
-                           grad_outputs=list(map(lambda t: torch.ones(t.size(), device = images.device), outputs)),
-                           create_graph=True, retain_graph=True, only_inputs=True)[0]
-
-    gradients = gradients.reshape(batch_size, -1)
-    return weight * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
 
 def gradient_accumulate_contexts(gradient_accumulate_every, is_ddp, ddps):
     if is_ddp:
@@ -392,7 +384,7 @@ class Generator(nn.Module):
 
             layer = nn.ModuleList([
                 nn.Sequential(
-                    nn.Upsample(scale_factor = 2, mode = 'bilinear', align_corners = False),
+                    nn.Upsample(scale_factor = 2),
                     conv2d(chan_in, chan_out * 2, 3, padding = 1),
                     norm_class(chan_out * 2),
                     nn.GLU(dim = 1)
@@ -445,7 +437,7 @@ class SimpleDecoder(nn.Module):
             last_layer = ind == (num_upsamples - 1)
             chan_out = chans if not last_layer else final_chan * 2
             layer = nn.Sequential(
-                nn.Upsample(scale_factor = 2, mode = 'bilinear', align_corners = False),
+                nn.Upsample(scale_factor = 2),
                 conv2d(chans, chan_out, 3, padding = 1),
                 norm_class(chan_out),
                 nn.GLU(dim = 1)
@@ -626,20 +618,25 @@ class LightweightGAN(nn.Module):
         self.GE = Generator(**G_kwargs)
         set_requires_grad(self.GE, False)
 
-        self.D_aug = AugWrapper(self.D, image_size)
 
         self.G_opt = Adam(self.G.parameters(), lr = lr, betas=(0.5, 0.9))
         self.D_opt = Adam(self.D.parameters(), lr = lr * ttur_mult, betas=(0.5, 0.9))
 
-        self._init_weights()
+        self.apply(self._init_weights)
+        self.apply(self._add_sn)
         self.reset_parameter_averaging()
 
         self.cuda(rank)
+        self.D_aug = AugWrapper(self.D, image_size)
 
-    def _init_weights(self):
-        for m in self.modules():
-            if type(m) in {nn.Conv2d, nn.Linear}:
-                nn.init.kaiming_normal_(m.weight, a=0, mode='fan_in', nonlinearity='leaky_relu')
+    def _add_sn(self, m):    
+        if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
+            return spectral_norm(m)
+        return m
+
+    def _init_weights(self, m):
+        if type(m) in {nn.Conv2d, nn.Linear}:
+            nn.init.kaiming_normal_(m.weight, a=0, mode='fan_in', nonlinearity='leaky_relu')
 
     def EMA(self):
         def update_moving_average(ma_model, current_model):
@@ -732,7 +729,6 @@ class Trainer():
 
         self.d_loss = 0
         self.g_loss = 0
-        self.last_gp_loss = None
         self.last_recon_loss = None
         self.last_fid = None
 
@@ -843,7 +839,6 @@ class Trainer():
         aug_types  = self.aug_types
         aug_kwargs = {'prob': aug_prob, 'types': aug_types}
 
-        apply_gradient_penalty = self.steps % 4 == 0
         apply_ss_aux_loss = self.steps % 8 == 0
 
         G = self.GAN.G if not self.is_ddp else self.G_ddp
@@ -874,11 +869,6 @@ class Trainer():
                 aux_loss = real_aux_loss
                 self.last_recon_loss = aux_loss.clone().detach().item()
                 disc_loss = disc_loss + aux_loss
-
-            if apply_gradient_penalty:
-                gp = gradient_penalty(image_batch, (real_output,))
-                self.last_gp_loss = gp.clone().detach().item()
-                disc_loss = disc_loss + gp
 
             disc_loss = disc_loss / self.gradient_accumulate_every
             disc_loss.register_hook(raise_if_nan)
@@ -1054,7 +1044,6 @@ class Trainer():
         data = [
             ('G', self.g_loss),
             ('D', self.d_loss),
-            ('GP', self.last_gp_loss),
             ('SS', self.last_recon_loss),
             ('FID', self.last_fid)
         ]
