@@ -736,15 +736,6 @@ class Trainer():
         self.rank = rank
         self.world_size = world_size
 
-        # set some global variables
-        global activation_fn
-        global norm_class
-        global conv2d
-
-        activation_fn = select_activation(activation)
-        norm_class = nn.BatchNorm2d if not use_groupnorm else lambda chans: nn.GroupNorm(num_channels = chans, num_groups = math.ceil(chans / 16))
-        conv2d = nn.Conv2d if not use_groupnorm else WSConv2d
-
     @property
     def image_extension(self):
         return 'jpg' if not self.transparent else 'png'
@@ -755,6 +746,18 @@ class Trainer():
         
     def init_GAN(self):
         args, kwargs = self.GAN_params
+
+        # set some global variables before instantiating GAN
+
+        global activation_fn
+        global norm_class
+        global conv2d
+
+        activation_fn = select_activation(activation)
+        norm_class = nn.BatchNorm2d if not use_groupnorm else lambda chans: nn.GroupNorm(num_channels = chans, num_groups = math.ceil(chans / 16))
+        conv2d = nn.Conv2d if not use_groupnorm else WSConv2d
+
+        # instantiate GAN
 
         self.GAN = LightweightGAN(
             lr = self.lr,
@@ -785,12 +788,20 @@ class Trainer():
         self.transparent = config['transparent']
         self.use_groupnorm = config['use_groupnorm']
         self.hamburger_res_layers = config['hamburger_res_layers']
+        self.use_groupnorm = config['use_groupnorm']
+        self.activation = config['activation']
         self.fmap_max = config.pop('fmap_max', 512)
         del self.GAN
         self.init_GAN()
 
     def config(self):
-        return {'image_size': self.image_size, 'transparent': self.transparent, 'use_groupnorm': self.use_groupnorm, 'hamburger_res_layers': self.hamburger_res_layers}
+        return {
+            'image_size': self.image_size,
+            'transparent': self.transparent,
+            'use_groupnorm': self.use_groupnorm,
+            'hamburger_res_layers': self.hamburger_res_layers,
+            'activation': self.activation
+        }
 
     def set_data_src(self, folder):
         self.dataset = ImageDataset(folder, self.image_size, transparent = self.transparent, aug_prob = self.dataset_aug_prob)
