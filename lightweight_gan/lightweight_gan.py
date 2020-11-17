@@ -715,6 +715,7 @@ class Trainer():
 
         self.gradient_accumulate_every = gradient_accumulate_every
 
+        self.activation = activation
         self.use_groupnorm = use_groupnorm
         self.hamburger_res_layers = hamburger_res_layers
 
@@ -753,9 +754,9 @@ class Trainer():
         global norm_class
         global conv2d
 
-        activation_fn = select_activation(activation)
-        norm_class = nn.BatchNorm2d if not use_groupnorm else lambda chans: nn.GroupNorm(num_channels = chans, num_groups = math.ceil(chans / 16))
-        conv2d = nn.Conv2d if not use_groupnorm else WSConv2d
+        activation_fn = select_activation(self.activation)
+        norm_class = nn.BatchNorm2d if not self.use_groupnorm else lambda chans: nn.GroupNorm(num_channels = chans, num_groups = math.ceil(chans / 16))
+        conv2d = nn.Conv2d if not self.use_groupnorm else WSConv2d
 
         # instantiate GAN
 
