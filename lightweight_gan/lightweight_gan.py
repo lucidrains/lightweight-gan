@@ -47,50 +47,6 @@ CALC_FID_NUM_IMAGES = 12800
 def exists(val):
     return val is not None
 
-class MishFn(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, x):
-        x_tanh_sp = torch.nn.functional.softplus(x).tanh()
-        if x.requires_grad:
-            ctx.save_for_backward(x_tanh_sp + x * x.sigmoid() * (1 - x_tanh_sp.square()))
-        y = x * x_tanh_sp
-        return y
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        if len(ctx.saved_tensors) == 0:
-            return None
-        grad, = ctx.saved_tensors
-        return grad_output * grad
-    
-    
-class SwishFn(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, i):
-        with torch.no_grad():
-            sigmoid_i = i.sigmoid()
-            result = i * sigmoid_i
-            if i.requires_grad:
-                grad = sigmoid_i + result * (1 - sigmoid_i)
-                ctx.save_for_backward(grad)
-        result.requires_grad_(i.requires_grad)
-        return result
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        grad, = ctx.saved_tensors
-        return grad_output * grad
-
-def select_activation(name):
-    return {'swish': SwishFn.apply,
-            'mish': MishFn.apply,
-            'elu': torch.nn.functional.elu,
-            'relu': torch.nn.functional.relu,
-            'gelu': torch.nn.functional.gelu,
-            'leaky_relu': torch.nn.functional.leaky_relu
-           }[name.lower()]
-    
-
 @contextmanager
 def null_context():
     yield
@@ -154,6 +110,60 @@ def slerp(val, low, high):
     so = torch.sin(omega)
     res = (torch.sin((1.0 - val) * omega) / so).unsqueeze(1) * low + (torch.sin(val * omega) / so).unsqueeze(1) * high
     return res
+
+# activation classes
+
+class Activation(nn.Module):
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+    def forward(self, x):
+        return self.fn(x)
+
+class MishFn(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        x_tanh_sp = torch.nn.functional.softplus(x).tanh()
+        if x.requires_grad:
+            ctx.save_for_backward(x_tanh_sp + x * x.sigmoid() * (1 - x_tanh_sp.square()))
+        y = x * x_tanh_sp
+        return y
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if len(ctx.saved_tensors) == 0:
+            return None
+        grad, = ctx.saved_tensors
+        return grad_output * grad
+    
+    
+class SwishFn(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, i):
+        with torch.no_grad():
+            sigmoid_i = i.sigmoid()
+            result = i * sigmoid_i
+            if i.requires_grad:
+                grad = sigmoid_i + result * (1 - sigmoid_i)
+                ctx.save_for_backward(grad)
+        result.requires_grad_(i.requires_grad)
+        return result
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        grad, = ctx.saved_tensors
+        return grad_output * grad
+
+def select_activation(name):
+    fn = {
+        'swish': SwishFn.apply,
+        'mish': MishFn.apply,
+        'elu': F.elu,
+        'relu': F.relu,
+        'gelu': F.gelu,
+        'leaky_relu': partial(F.leaky_relu, negative_slope = 0.1)
+    }[name.lower()]
+    return lambda: Activation(fn)
 
 # helper classes
 
@@ -270,6 +280,10 @@ class AugWrapper(nn.Module):
 
         return self.D(images, **kwargs)
 
+# modifiable global variables
+
+activation_fn = select_activation('leaky_relu')
+
 # classes
 
 class SLE(nn.Module):
@@ -283,7 +297,7 @@ class SLE(nn.Module):
         self.net = nn.Sequential(
             nn.AdaptiveAvgPool2d((4, 4)),
             nn.Conv2d(chan_in, chan_in, 4),
-            nn.LeakyReLU(0.1),
+            activation_fn(),
             nn.Conv2d(chan_in, chan_out, 1),
             nn.Sigmoid()
         )
@@ -461,7 +475,7 @@ class Discriminator(nn.Module):
             self.non_residual_layers.append(nn.Sequential(
                 nn.Conv2d(init_channel, chan_out, 4, stride = 2, padding = 1),
                 norm_class(chan_out) if not first_layer else nn.Identity(),
-                nn.LeakyReLU(0.1)
+                activation_fn()
             ))
 
         self.residual_layers = nn.ModuleList([])
@@ -479,16 +493,16 @@ class Discriminator(nn.Module):
                 nn.Sequential(
                     nn.Conv2d(chan_in, chan_out, 4, stride = 2, padding = 1),
                     norm_class(chan_out),
-                    nn.LeakyReLU(0.1),
+                    activation_fn(),
                     nn.Conv2d(chan_out, chan_out, 3, padding = 1),
                     norm_class(chan_out),
-                    nn.LeakyReLU(0.1)
+                    activation_fn()
                 ),
                 nn.Sequential(
                     nn.AvgPool2d(2),
                     nn.Conv2d(chan_in, chan_out, 1),
                     norm_class(chan_out),
-                    nn.LeakyReLU(0.1)
+                    activation_fn()
                 ),
                 hamburger
             ]))
@@ -497,7 +511,7 @@ class Discriminator(nn.Module):
         self.to_logits = nn.Sequential(
             nn.Conv2d(last_chan, last_chan, 1),
             norm_class(last_chan),
-            nn.LeakyReLU(0.1),
+            activation_fn(),
             nn.Conv2d(last_chan, 1, 4)
         )
 
@@ -608,7 +622,7 @@ class LightweightGAN(nn.Module):
     def _init_weights(self):
         for m in self.modules():
             if type(m) in {nn.Conv2d, nn.Linear}:
-                nn.init.kaiming_normal_(m.weight, a=0, mode='fan_in', nonlinearity='leaky_relu')
+                nn.init.normal_(m.weight, std=0.02)
 
     def EMA(self):
         def update_moving_average(ma_model, current_model):
@@ -656,6 +670,7 @@ class Trainer():
         rank = 0,
         world_size = 1,
         log = False,
+        activation = 'leaky_relu',
         *args,
         **kwargs
     ):
@@ -710,6 +725,10 @@ class Trainer():
         self.is_main = rank == 0
         self.rank = rank
         self.world_size = world_size
+
+        # set some global variables
+        global activation_fn
+        activation_fn = select_activation(activation)
 
     @property
     def image_extension(self):

@@ -95,7 +95,7 @@ def train_from_folder(
     multi_gpus = False,
     calculate_fid_every = None,
     seed = 42,
-    log = False
+    activation = 'leaky_relu'
 ):
     model_args = dict(
         name = name,
@@ -116,7 +116,7 @@ def train_from_folder(
         aug_types = cast_list(aug_types),
         dataset_aug_prob = dataset_aug_prob,
         calculate_fid_every = calculate_fid_every,
-        log = log
+        activation = activation
     )
 
     if generate:
