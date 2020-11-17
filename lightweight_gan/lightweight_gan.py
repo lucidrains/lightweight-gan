@@ -164,19 +164,31 @@ def select_activation(name):
     }[name.lower()]
     return lambda: Activation(fn)
 
-# weight standardized conv2d
+# evonorm
 
-class WSConv2d(nn.Conv2d):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+def group_std(x, groups = 32, eps = 1e-5):  
+    shape = x.shape 
+    x = rearrange(x, 'b (g c) h w -> b g c h w', g = groups)    
+    var = torch.var(x, dim = (2, 3, 4), keepdim = True).expand_as(x)    
+    return torch.reshape(torch.sqrt(var + eps), shape)  
 
-    def forward(self, x):
-        weight = self.weight
-        weight_mean = weight.mean(dim=(1, 2, 3), keepdim=True)
-        weight = weight - weight_mean
-        std = weight.view(weight.size(0), -1).std(dim=1).view(-1, 1, 1, 1) + 1e-5
-        weight = weight / std.expand_as(weight)
-        return F.conv2d(x, weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
+class EvoNorm2d(nn.Module): 
+    def __init__(   
+        self,   
+        input,  
+        groups = 32,
+        eps = 1e-5, 
+    ):  
+        super().__init__()  
+        self.eps = eps  
+        self.groups = groups
+        self.gamma = nn.Parameter(torch.ones(1, input, 1, 1))   
+        self.beta = nn.Parameter(torch.zeros(1, input, 1, 1))   
+        self.v = nn.Parameter(torch.ones(1, input, 1, 1))   
+
+    def forward(self, x):   
+        num = x * torch.sigmoid(self.v * x) 
+        return num / group_std(x, groups = self.groups, eps = self.eps) * self.gamma + self.beta
 
 # helper classes
 
@@ -328,8 +340,7 @@ class Generator(nn.Module):
         fmap_max = 512,
         fmap_inverse_coef = 12,
         transparent = False,
-        hamburger_res_layers = [],
-        use_groupnorm = False
+        hamburger_res_layers = []
     ):
         super().__init__()
         resolution = log2(image_size)
@@ -423,7 +434,6 @@ class SimpleDecoder(nn.Module):
         chan_in,
         chan_out = 3,
         num_upsamples = 4,
-        use_groupnorm = False
     ):
         super().__init__()
 
@@ -456,8 +466,7 @@ class Discriminator(nn.Module):
         fmap_max = 512,
         fmap_inverse_coef = 12,
         transparent = False,
-        hamburger_res_layers = [],
-        use_groupnorm = False
+        hamburger_res_layers = []
     ):
         super().__init__()
         resolution = log2(image_size)
@@ -525,8 +534,8 @@ class Discriminator(nn.Module):
             nn.Conv2d(last_chan, 1, 4)
         )
 
-        self.decoder1 = SimpleDecoder(chan_in = last_chan, chan_out = init_channel, use_groupnorm = use_groupnorm)
-        self.decoder2 = SimpleDecoder(chan_in = features[-2][-1], chan_out = init_channel, use_groupnorm = use_groupnorm)
+        self.decoder1 = SimpleDecoder(chan_in = last_chan, chan_out = init_channel)
+        self.decoder2 = SimpleDecoder(chan_in = features[-2][-1], chan_out = init_channel)
 
     def forward(self, x, calc_aux_loss = False):
         orig_img = x
@@ -587,8 +596,7 @@ class LightweightGAN(nn.Module):
         ttur_mult = 1.5,
         lr = 2e-4,
         rank = 0,
-        hamburger_res_layers = [],
-        use_groupnorm = False
+        hamburger_res_layers = []
     ):
         super().__init__()
         self.latent_dim = latent_dim
@@ -600,8 +608,7 @@ class LightweightGAN(nn.Module):
             fmap_max = fmap_max,
             fmap_inverse_coef = fmap_inverse_coef,
             transparent = transparent,
-            hamburger_res_layers = hamburger_res_layers,
-            use_groupnorm = use_groupnorm
+            hamburger_res_layers = hamburger_res_layers
         )
 
         self.G = Generator(**G_kwargs)
@@ -615,8 +622,7 @@ class LightweightGAN(nn.Module):
             fmap_max = fmap_max,
             fmap_inverse_coef = fmap_inverse_coef,
             transparent = transparent,
-            hamburger_res_layers = hamburger_res_layers,
-            use_groupnorm = use_groupnorm
+            hamburger_res_layers = hamburger_res_layers
         )
 
         self.D_aug = AugWrapper(self.D, image_size)
@@ -632,7 +638,7 @@ class LightweightGAN(nn.Module):
     def _init_weights(self):
         for m in self.modules():
             if type(m) in {nn.Conv2d, nn.Linear}:
-                nn.init.normal_(m.weight, std=0.02)
+                nn.init.kaiming_normal_(m.weight, a=0, mode='fan_in', nonlinearity='leaky_relu')
 
     def EMA(self):
         def update_moving_average(ma_model, current_model):
@@ -665,7 +671,7 @@ class Trainer():
         mixed_prob = 0.9,
         gradient_accumulate_every = 1,
         hamburger_res_layers = [],
-        use_groupnorm = False,
+        use_evonorm = False,
         lr = 2e-4,
         lr_mlp = 1.,
         ttur_mult = 2,
@@ -716,7 +722,7 @@ class Trainer():
         self.gradient_accumulate_every = gradient_accumulate_every
 
         self.activation = activation
-        self.use_groupnorm = use_groupnorm
+        self.use_evonorm = use_evonorm
         self.hamburger_res_layers = hamburger_res_layers
 
         self.d_loss = 0
@@ -752,11 +758,9 @@ class Trainer():
 
         global activation_fn
         global norm_class
-        global conv2d
 
         activation_fn = select_activation(self.activation)
-        norm_class = nn.BatchNorm2d if not self.use_groupnorm else lambda chans: nn.GroupNorm(num_channels = chans, num_groups = math.ceil(chans / 16))
-        conv2d = nn.Conv2d if not self.use_groupnorm else WSConv2d
+        norm_class = nn.BatchNorm2d if not self.use_evonorm else lambda chans: EvoNorm2d(chans, groups = math.ceil(chans / 16)) if chans >= 64 else nn.Identity()
 
         # instantiate GAN
 
@@ -764,7 +768,6 @@ class Trainer():
             lr = self.lr,
             latent_dim = self.latent_dim,
             hamburger_res_layers = self.hamburger_res_layers,
-            use_groupnorm = self.use_groupnorm,
             image_size = self.image_size,
             ttur_mult = self.ttur_mult,
             fmap_max = self.fmap_max,
@@ -787,9 +790,9 @@ class Trainer():
         config = self.config() if not self.config_path.exists() else json.loads(self.config_path.read_text())
         self.image_size = config['image_size']
         self.transparent = config['transparent']
-        self.use_groupnorm = config['use_groupnorm']
+        self.use_evonorm = config['use_evonorm']
         self.hamburger_res_layers = config['hamburger_res_layers']
-        self.use_groupnorm = config['use_groupnorm']
+        self.use_evonorm = config['use_evonorm']
         self.activation = config['activation']
         self.fmap_max = config.pop('fmap_max', 512)
         del self.GAN
@@ -799,7 +802,7 @@ class Trainer():
         return {
             'image_size': self.image_size,
             'transparent': self.transparent,
-            'use_groupnorm': self.use_groupnorm,
+            'use_evonorm': self.use_evonorm,
             'hamburger_res_layers': self.hamburger_res_layers,
             'activation': self.activation
         }
@@ -843,7 +846,7 @@ class Trainer():
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
 
             generated_images = G(latents)
-            fake_output, fake_aux_loss = D_aug(generated_images.clone().detach(), detach = True, calc_aux_loss = True, **aug_kwargs)
+            fake_output, _ = D_aug(generated_images.clone().detach(), detach = True, **aug_kwargs)
 
             image_batch = next(self.loader).cuda(self.rank)
             image_batch.requires_grad_()
@@ -855,7 +858,7 @@ class Trainer():
             divergence = (F.relu(1 + real_output_loss) + F.relu(1 - fake_output_loss)).mean()
             disc_loss = divergence
 
-            aux_loss = fake_aux_loss + real_aux_loss
+            aux_loss = real_aux_loss
             self.last_recon_loss = aux_loss.clone().detach().item()
             disc_loss = disc_loss + aux_loss
 
