@@ -392,7 +392,7 @@ class Generator(nn.Module):
 
             layer = nn.ModuleList([
                 nn.Sequential(
-                    nn.Upsample(scale_factor = 2),
+                    nn.Upsample(scale_factor = 2, mode = 'bilinear', align_corners = False),
                     conv2d(chan_in, chan_out * 2, 3, padding = 1),
                     norm_class(chan_out * 2),
                     nn.GLU(dim = 1)
@@ -445,7 +445,7 @@ class SimpleDecoder(nn.Module):
             last_layer = ind == (num_upsamples - 1)
             chan_out = chans if not last_layer else final_chan * 2
             layer = nn.Sequential(
-                nn.Upsample(scale_factor = 2),
+                nn.Upsample(scale_factor = 2, mode = 'bilinear', align_corners = False),
                 conv2d(chans, chan_out, 3, padding = 1),
                 norm_class(chan_out),
                 nn.GLU(dim = 1)
@@ -593,10 +593,11 @@ class LightweightGAN(nn.Module):
         fmap_max = 512,
         fmap_inverse_coef = 12,
         transparent = False,
+        hamburger_res_layers = [],
         ttur_mult = 1.5,
         lr = 2e-4,
         rank = 0,
-        hamburger_res_layers = []
+        ddp = False
     ):
         super().__init__()
         self.latent_dim = latent_dim
@@ -613,10 +614,6 @@ class LightweightGAN(nn.Module):
 
         self.G = Generator(**G_kwargs)
 
-        self.ema_updater = EMA(0.995)
-        self.GE = Generator(**G_kwargs)
-        set_requires_grad(self.GE, False)
-
         self.D = Discriminator(
             image_size = image_size,
             fmap_max = fmap_max,
@@ -624,6 +621,10 @@ class LightweightGAN(nn.Module):
             transparent = transparent,
             hamburger_res_layers = hamburger_res_layers
         )
+
+        self.ema_updater = EMA(0.995)
+        self.GE = Generator(**G_kwargs)
+        set_requires_grad(self.GE, False)
 
         self.D_aug = AugWrapper(self.D, image_size)
 
@@ -747,6 +748,8 @@ class Trainer():
         self.rank = rank
         self.world_size = world_size
 
+        self.syncbatchnorm = is_ddp
+
     @property
     def image_extension(self):
         return 'jpg' if not self.transparent else 'png'
@@ -765,6 +768,7 @@ class Trainer():
 
         activation_fn = select_activation(self.activation)
         norm_class = nn.BatchNorm2d if not self.use_evonorm else lambda chans: EvoNorm2d(chans, groups = 32) if chans >= 64 else nn.Identity()
+        norm_class = nn.SyncBatchNorm if not self.use_evonorm and self.syncbatchnorm else norm_class
 
         # instantiate GAN
 
@@ -782,7 +786,8 @@ class Trainer():
         )
 
         if self.is_ddp:
-            ddp_kwargs = {'device_ids': [self.rank], 'broadcast_buffers': False, 'find_unused_parameters': True}
+            ddp_kwargs = {'device_ids': [self.rank], 'output_device': self.rank, 'find_unused_parameters': True}
+
             self.G_ddp = DDP(self.GAN.G, **ddp_kwargs)
             self.D_ddp = DDP(self.GAN.D, **ddp_kwargs)
             self.D_aug_ddp = DDP(self.GAN.D_aug, **ddp_kwargs)
@@ -798,6 +803,7 @@ class Trainer():
         self.hamburger_res_layers = config['hamburger_res_layers']
         self.use_evonorm = config['use_evonorm']
         self.activation = config['activation']
+        self.syncbatchnorm = config['syncbatchnorm']
         self.fmap_max = config.pop('fmap_max', 512)
         del self.GAN
         self.init_GAN()
@@ -807,6 +813,7 @@ class Trainer():
             'image_size': self.image_size,
             'transparent': self.transparent,
             'use_evonorm': self.use_evonorm,
+            'syncbatchnorm': self.syncbatchnorm,
             'hamburger_res_layers': self.hamburger_res_layers,
             'activation': self.activation
         }
@@ -837,6 +844,7 @@ class Trainer():
         aug_kwargs = {'prob': aug_prob, 'types': aug_types}
 
         apply_gradient_penalty = self.steps % 4 == 0
+        apply_ss_aux_loss = self.steps % 8 == 0
 
         G = self.GAN.G if not self.is_ddp else self.G_ddp
         D = self.GAN.D if not self.is_ddp else self.D_ddp
@@ -854,7 +862,7 @@ class Trainer():
 
             image_batch = next(self.loader).cuda(self.rank)
             image_batch.requires_grad_()
-            real_output, real_aux_loss = D_aug(image_batch,  calc_aux_loss = True, **aug_kwargs)
+            real_output, real_aux_loss = D_aug(image_batch,  calc_aux_loss = apply_ss_aux_loss, **aug_kwargs)
 
             real_output_loss = real_output
             fake_output_loss = fake_output
@@ -862,11 +870,12 @@ class Trainer():
             divergence = (F.relu(1 + real_output_loss) + F.relu(1 - fake_output_loss)).mean()
             disc_loss = divergence
 
-            aux_loss = real_aux_loss
-            self.last_recon_loss = aux_loss.clone().detach().item()
-            disc_loss = disc_loss + aux_loss
+            if exists(real_aux_loss):
+                aux_loss = real_aux_loss
+                self.last_recon_loss = aux_loss.clone().detach().item()
+                disc_loss = disc_loss + aux_loss
 
-            if apply_gradient_penalty:
+            if apply_gradient_penalty and False:
                 gp = gradient_penalty(image_batch, (real_output,))
                 self.last_gp_loss = gp.clone().detach().item()
                 disc_loss = disc_loss + gp
