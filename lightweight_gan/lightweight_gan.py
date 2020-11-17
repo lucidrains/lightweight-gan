@@ -624,7 +624,7 @@ class LightweightGAN(nn.Module):
         self.D_opt = Adam(self.D.parameters(), lr = lr * ttur_mult, betas=(0.5, 0.9))
 
         self.apply(self._init_weights)
-        self.apply(self._add_sn)
+        self.D.apply(self._add_sn)
         self.reset_parameter_averaging()
 
         self.cuda(rank)
@@ -1098,7 +1098,7 @@ class Trainer():
 
         load_data = torch.load(self.model_name(name))
 
-        if 'version' in load_data:
+        if 'version' in load_data and self.is_main:
             print(f"loading from version {load_data['version']}")
 
         try:
