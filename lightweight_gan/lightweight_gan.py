@@ -849,8 +849,6 @@ class Trainer():
         aug_types  = self.aug_types
         aug_kwargs = {'prob': aug_prob, 'types': aug_types}
 
-        apply_ss_aux_loss = self.steps % 8 == 0
-
         G = self.GAN.G if not self.is_ddp else self.G_ddp
         D = self.GAN.D if not self.is_ddp else self.D_ddp
         D_aug = self.GAN.D_aug if not self.is_ddp else self.D_aug_ddp
@@ -867,7 +865,7 @@ class Trainer():
 
             image_batch = next(self.loader).cuda(self.rank)
             image_batch.requires_grad_()
-            real_output, real_aux_loss = D_aug(image_batch,  calc_aux_loss = apply_ss_aux_loss, **aug_kwargs)
+            real_output, real_aux_loss = D_aug(image_batch,  calc_aux_loss = True, **aug_kwargs)
 
             real_output_loss = real_output
             fake_output_loss = fake_output
