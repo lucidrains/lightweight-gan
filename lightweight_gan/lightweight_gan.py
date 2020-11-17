@@ -861,7 +861,7 @@ class Trainer():
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
 
             generated_images = G(latents)
-            fake_output, _ = D_aug(generated_images.clone().detach(), detach = True, **aug_kwargs)
+            fake_output, fake_aux_loss = D_aug(generated_images.clone().detach(), calc_aux_loss = True, detach = True, **aug_kwargs)
 
             image_batch = next(self.loader).cuda(self.rank)
             image_batch.requires_grad_()
@@ -874,7 +874,7 @@ class Trainer():
             disc_loss = divergence
 
             if exists(real_aux_loss):
-                aux_loss = real_aux_loss
+                aux_loss = real_aux_loss + fake_aux_loss
                 self.last_recon_loss = aux_loss.clone().detach().item()
                 disc_loss = disc_loss + aux_loss
 
