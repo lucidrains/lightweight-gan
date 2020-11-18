@@ -739,13 +739,14 @@ class Trainer():
 
     def train(self):
         assert exists(self.loader), 'You must first initialize the data source with `.set_data_src(<folder of images>)`'
+        device = torch.device(f'cuda:{self.rank}')
 
         if not exists(self.GAN):
             self.init_GAN()
 
         self.GAN.train()
-        total_disc_loss = torch.tensor(0.).cuda(self.rank)
-        total_gen_loss = torch.tensor(0.).cuda(self.rank)
+        total_disc_loss = torch.zeros([], device=device)
+        total_gen_loss = torch.zeros([], device=device)
 
         batch_size = math.ceil(self.batch_size / self.world_size)
 
@@ -768,7 +769,7 @@ class Trainer():
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
 
             generated_images = G(latents)
-            fake_output, fake_aux_loss = D_aug(generated_images.clone().detach(), calc_aux_loss = True, detach = True, **aug_kwargs)
+            fake_output, fake_aux_loss = D_aug(generated_images.detach(), calc_aux_loss = True, detach = True, **aug_kwargs)
 
             image_batch = next(self.loader).cuda(self.rank)
             image_batch.requires_grad_()
@@ -781,16 +782,18 @@ class Trainer():
             disc_loss = divergence
 
             aux_loss = real_aux_loss + fake_aux_loss
-            self.last_recon_loss = aux_loss.clone().detach().item()
             disc_loss = disc_loss + aux_loss
 
             disc_loss = disc_loss / self.gradient_accumulate_every
             disc_loss.register_hook(raise_if_nan)
             disc_loss.backward()
 
-            total_disc_loss += divergence.detach().item() / self.gradient_accumulate_every
+            if i % log_step == 0:
+                total_disc_loss += divergence
 
-        self.d_loss = float(total_disc_loss)
+        self.last_recon_loss = aux_loss.item()
+        self.d_loss = float(total_disc_loss.item() / self.gradient_accumulate_every)
+        del total_disc_loss
 
         self.GAN.D_opt.step()
 
@@ -811,9 +814,9 @@ class Trainer():
             gen_loss.register_hook(raise_if_nan)
             gen_loss.backward()
 
-            total_gen_loss += loss.detach().item() / self.gradient_accumulate_every
+            total_gen_loss += loss 
 
-        self.g_loss = float(total_gen_loss)
+        self.g_loss = float(total_gen_loss.item() / self.gradient_accumulate_every)
 
         self.GAN.G_opt.step()
 
