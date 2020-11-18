@@ -15,7 +15,6 @@ from torch import nn, einsum
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torch.autograd import grad as torch_grad
-from torch.nn.utils import spectral_norm
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
@@ -87,6 +86,15 @@ def gradient_accumulate_contexts(gradient_accumulate_every, is_ddp, ddps):
     for context in contexts:
         with context():
             yield
+
+def gradient_penalty(images, outputs, weight = 10):
+    batch_size = images.shape[0]
+    gradients = torch_grad(outputs=outputs, inputs=images,
+                           grad_outputs=list(map(lambda t: torch.ones(t.size(), device = images.device), outputs)),
+                           create_graph=True, retain_graph=True, only_inputs=True)[0]
+
+    gradients = gradients.reshape(batch_size, -1)
+    return weight * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
 
 def evaluate_in_chunks(max_batch_size, model, *args):
     split_args = list(zip(*list(map(lambda x: x.split(max_batch_size, dim=0), args))))
@@ -244,9 +252,6 @@ def resize_to_minimum_size(min_size, image):
         return torchvision.transforms.functional.resize(image, min_size)
     return image
 
-def normalize_image(image):
-    return (image * 2) - 1
-
 class ImageDataset(Dataset):
     def __init__(self, folder, image_size, transparent = False, aug_prob = 0.):
         super().__init__()
@@ -264,8 +269,7 @@ class ImageDataset(Dataset):
             transforms.Resize(image_size),
             RandomApply(aug_prob, transforms.RandomResizedCrop(image_size, scale=(0.5, 1.0), ratio=(0.98, 1.02)), transforms.CenterCrop(image_size)),
             transforms.ToTensor(),
-            transforms.Lambda(expand_greyscale(transparent)),
-            transforms.Lambda(normalize_image)
+            transforms.Lambda(expand_greyscale(transparent))
         ])
 
     def __len__(self):
@@ -417,8 +421,7 @@ class Generator(nn.Module):
             if res in residuals:
                 x = x * residuals[res]
 
-        x = self.out_conv(x)
-        return x.tanh()
+        return self.out_conv(x)
 
 class SimpleDecoder(nn.Module):
     def __init__(
@@ -440,7 +443,6 @@ class SimpleDecoder(nn.Module):
             layer = nn.Sequential(
                 nn.Upsample(scale_factor = 2),
                 conv2d(chans, chan_out, 3, padding = 1),
-                norm_class(chan_out),
                 nn.GLU(dim = 1)
             )
             self.layers.append(layer)
@@ -486,7 +488,6 @@ class Discriminator(nn.Module):
 
             self.non_residual_layers.append(nn.Sequential(
                 conv2d(init_channel, chan_out, 4, stride = 2, padding = 1),
-                norm_class(chan_out) if not first_layer else nn.Identity(),
                 activation_fn()
             ))
 
@@ -504,16 +505,13 @@ class Discriminator(nn.Module):
             self.residual_layers.append(nn.ModuleList([
                 nn.Sequential(
                     conv2d(chan_in, chan_out, 4, stride = 2, padding = 1),
-                    norm_class(chan_out),
                     activation_fn(),
                     conv2d(chan_out, chan_out, 3, padding = 1),
-                    norm_class(chan_out),
                     activation_fn()
                 ),
                 nn.Sequential(
                     nn.AvgPool2d(2),
                     conv2d(chan_in, chan_out, 1),
-                    norm_class(chan_out),
                     activation_fn()
                 ),
                 hamburger
@@ -522,7 +520,6 @@ class Discriminator(nn.Module):
         last_chan = features[-1][-1]
         self.to_logits = nn.Sequential(
             conv2d(last_chan, last_chan, 1),
-            norm_class(last_chan),
             activation_fn(),
             nn.Conv2d(last_chan, 1, 4)
         )
@@ -624,16 +621,10 @@ class LightweightGAN(nn.Module):
         self.D_opt = Adam(self.D.parameters(), lr = lr * ttur_mult, betas=(0.5, 0.9))
 
         self.apply(self._init_weights)
-        self.D.apply(self._add_sn)
         self.reset_parameter_averaging()
 
         self.cuda(rank)
         self.D_aug = AugWrapper(self.D, image_size)
-
-    def _add_sn(self, m):    
-        if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
-            return spectral_norm(m)
-        return m
 
     def _init_weights(self, m):
         if type(m) in {nn.Conv2d, nn.Linear}:
@@ -730,6 +721,7 @@ class Trainer():
 
         self.d_loss = 0
         self.g_loss = 0
+        self.last_gp_loss = None
         self.last_recon_loss = None
         self.last_fid = None
 
@@ -853,6 +845,8 @@ class Trainer():
         D = self.GAN.D if not self.is_ddp else self.D_ddp
         D_aug = self.GAN.D_aug if not self.is_ddp else self.D_aug_ddp
 
+        apply_gradient_penalty = self.steps % 4 == 0
+
         # train discriminator
 
         self.GAN.D_opt.zero_grad()
@@ -873,10 +867,14 @@ class Trainer():
             divergence = (F.relu(1 + real_output_loss) + F.relu(1 - fake_output_loss)).mean()
             disc_loss = divergence
 
-            if exists(real_aux_loss):
-                aux_loss = real_aux_loss + fake_aux_loss
-                self.last_recon_loss = aux_loss.clone().detach().item()
-                disc_loss = disc_loss + aux_loss
+            aux_loss = real_aux_loss + fake_aux_loss
+            self.last_recon_loss = aux_loss.clone().detach().item()
+            disc_loss = disc_loss + aux_loss
+
+            if apply_gradient_penalty:
+                gp = gradient_penalty(image_batch, (real_output,))
+                self.last_gp_loss = gp.clone().detach().item()
+                disc_loss = disc_loss + gp
 
             disc_loss = disc_loss / self.gradient_accumulate_every
             disc_loss.register_hook(raise_if_nan)
@@ -1009,7 +1007,7 @@ class Trainer():
     @torch.no_grad()
     def generate_truncated(self, G, style, trunc_psi = 0.75, num_image_tiles = 8):
         generated_images = evaluate_in_chunks(self.batch_size, G, style)
-        return (generated_images + 1) * 0.5
+        return generated_images.clamp_(0., 1.)
 
     @torch.no_grad()
     def generate_interpolation(self, num = 0, num_image_tiles = 8, trunc = 1.0, num_steps = 100, save_frames = False):
@@ -1052,6 +1050,7 @@ class Trainer():
         data = [
             ('G', self.g_loss),
             ('D', self.d_loss),
+            ('GP', self.last_gp_loss),
             ('SS', self.last_recon_loss),
             ('FID', self.last_fid)
         ]
