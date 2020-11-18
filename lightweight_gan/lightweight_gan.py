@@ -17,7 +17,7 @@ from torch.utils.data import Dataset, DataLoader
 from torch.autograd import grad as torch_grad
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.nn.utils import weight_norm as WN
+from torch.nn.utils import spectral_norm as SN
 
 from PIL import Image
 import torchvision
@@ -426,25 +426,32 @@ class Discriminator(nn.Module):
 
             self.residual_layers.append(nn.ModuleList([
                 nn.Sequential(
-                    WN(nn.Conv2d(chan_in, chan_out, 4, stride = 2, padding = 1)),
+                    SN(nn.Conv2d(chan_in, chan_out, 4, stride = 2, padding = 1)),
                     nn.LeakyReLU(0.1),
-                    WN(nn.Conv2d(chan_out, chan_out, 3, padding = 1)),
+                    SN(nn.Conv2d(chan_out, chan_out, 3, padding = 1)),
                     nn.LeakyReLU(0.1)
                 ),
                 nn.Sequential(
                     nn.AvgPool2d(2),
-                    WN(nn.Conv2d(chan_in, chan_out, 1)),
+                    SN(nn.Conv2d(chan_in, chan_out, 1)),
                     nn.LeakyReLU(0.1),
                 ),
                 hamburger
             ]))
 
         last_chan = features[-1][-1]
-        self.to_logits = nn.Sequential(
-            WN(nn.Conv2d(last_chan, last_chan, 1)) if disc_output_size == 5 else nn.Conv2d(last_chan, last_chan, 4, stride = 2, padding = 1),
-            nn.LeakyReLU(0.1),
-            nn.Conv2d(last_chan, 1, 4)
-        )
+        if disc_output_size == 5:
+            self.to_logits = nn.Sequential(
+                SN(nn.Conv2d(last_chan, last_chan, 1)),
+                nn.LeakyReLU(0.1),
+                nn.Conv2d(last_chan, 1, 4)
+            )
+        elif disc_output_size == 1:
+            self.to_logits = nn.Sequential(
+                SN(nn.Conv2d(last_chan, last_chan, 4)),
+                nn.LeakyReLU(0.1),
+                nn.Conv2d(last_chan, 1, 4)
+            )
 
         self.decoder1 = SimpleDecoder(chan_in = last_chan, chan_out = init_channel)
         self.decoder2 = SimpleDecoder(chan_in = features[-2][-1], chan_out = init_channel) if resolution >= 9 else None
