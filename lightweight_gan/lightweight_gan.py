@@ -392,7 +392,8 @@ class Discriminator(nn.Module):
         num_non_residual_layers = max(0, int(resolution) - 8)
         num_residual_layers = 8 - 3
 
-        features = list(map(lambda n: (n,  2 ** (fmap_inverse_coef - n)), range(resolution, 2, -1)))
+        non_residual_resolutions = range(min(8, resolution), 2, -1)
+        features = list(map(lambda n: (n,  2 ** (fmap_inverse_coef - n)), non_residual_resolutions))
         features = list(map(lambda n: (n[0], min(n[1], fmap_max)), features))
 
         if num_non_residual_layers == 0:
@@ -413,7 +414,7 @@ class Discriminator(nn.Module):
             ))
 
         self.residual_layers = nn.ModuleList([])
-        for (res, ((_, chan_in), (_, chan_out))) in zip(range(resolution, 2, -1), chan_in_out):
+        for (res, ((_, chan_in), (_, chan_out))) in zip(non_residual_resolutions, chan_in_out):
             image_width = 2 ** resolution
 
             hamburger = None
