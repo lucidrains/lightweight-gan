@@ -84,7 +84,7 @@ def train_from_folder(
     generate = False,
     generate_interpolation = False,
     hamburger_res_layers = [32],
-    disc_output_size = 5,
+    disc_output_size = 1,
     interpolation_num_steps = 100,
     save_frames = False,
     num_image_tiles = 8,

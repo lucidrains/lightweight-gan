@@ -17,6 +17,7 @@ from torch.utils.data import Dataset, DataLoader
 from torch.autograd import grad as torch_grad
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.nn.utils import weight_norm as WN
 
 from PIL import Image
 import torchvision
@@ -86,15 +87,6 @@ def gradient_accumulate_contexts(gradient_accumulate_every, is_ddp, ddps):
     for context in contexts:
         with context():
             yield
-
-def gradient_penalty(images, outputs, weight = 10):
-    batch_size = images.shape[0]
-    gradients = torch_grad(outputs=outputs, inputs=images,
-                           grad_outputs=list(map(lambda t: torch.ones(t.size(), device = images.device), outputs)),
-                           create_graph=True, retain_graph=True, only_inputs=True)[0]
-
-    gradients = gradients.reshape(batch_size, -1)
-    return weight * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
 
 def evaluate_in_chunks(max_batch_size, model, *args):
     split_args = list(zip(*list(map(lambda x: x.split(max_batch_size, dim=0), args))))
@@ -172,6 +164,9 @@ def resize_to_minimum_size(min_size, image):
         return torchvision.transforms.functional.resize(image, min_size)
     return image
 
+def normalize_image(img):
+    return img * 2 - 1
+
 class ImageDataset(Dataset):
     def __init__(self, folder, image_size, transparent = False, aug_prob = 0.):
         super().__init__()
@@ -189,7 +184,8 @@ class ImageDataset(Dataset):
             transforms.Resize(image_size),
             RandomApply(aug_prob, transforms.RandomResizedCrop(image_size, scale=(0.5, 1.0), ratio=(0.98, 1.02)), transforms.CenterCrop(image_size)),
             transforms.ToTensor(),
-            transforms.Lambda(expand_greyscale(transparent))
+            transforms.Lambda(expand_greyscale(transparent)),
+            transforms.Lambda(normalize_image)
         ])
 
     def __len__(self):
@@ -225,6 +221,9 @@ class AugWrapper(nn.Module):
 # modifiable global variables
 
 norm_class = nn.BatchNorm2d
+
+def upsample():
+    return nn.Upsample(scale_factor = 2)
 
 # classes
 
@@ -307,7 +306,7 @@ class Generator(nn.Module):
 
             layer = nn.ModuleList([
                 nn.Sequential(
-                    nn.Upsample(scale_factor = 2),
+                    upsample(),
                     nn.Conv2d(chan_in, chan_out * 2, 3, padding = 1),
                     norm_class(chan_out * 2),
                     nn.GLU(dim = 1)
@@ -339,7 +338,7 @@ class Generator(nn.Module):
             if res in residuals:
                 x = x * residuals[res]
 
-        return self.out_conv(x)
+        return self.out_conv(x).tanh()
 
 class SimpleDecoder(nn.Module):
     def __init__(
@@ -359,7 +358,7 @@ class SimpleDecoder(nn.Module):
             last_layer = ind == (num_upsamples - 1)
             chan_out = chans if not last_layer else final_chan * 2
             layer = nn.Sequential(
-                nn.Upsample(scale_factor = 2),
+                upsample(),
                 nn.Conv2d(chans, chan_out, 3, padding = 1),
                 nn.GLU(dim = 1)
             )
@@ -393,7 +392,8 @@ class Discriminator(nn.Module):
         num_non_residual_layers = max(0, int(resolution) - 8)
         num_residual_layers = 8 - 3
 
-        features = list(map(lambda n: (n,  2 ** (fmap_inverse_coef - n)), range(resolution, 2, -1)))
+        non_residual_resolutions = range(min(8, resolution), 2, -1)
+        features = list(map(lambda n: (n,  2 ** (fmap_inverse_coef - n)), non_residual_resolutions))
         features = list(map(lambda n: (n[0], min(n[1], fmap_max)), features))
 
         if num_non_residual_layers == 0:
@@ -414,7 +414,7 @@ class Discriminator(nn.Module):
             ))
 
         self.residual_layers = nn.ModuleList([])
-        for (res, ((_, chan_in), (_, chan_out))) in zip(range(resolution, 2, -1), chan_in_out):
+        for (res, ((_, chan_in), (_, chan_out))) in zip(non_residual_resolutions, chan_in_out):
             image_width = 2 ** resolution
 
             hamburger = None
@@ -426,14 +426,14 @@ class Discriminator(nn.Module):
 
             self.residual_layers.append(nn.ModuleList([
                 nn.Sequential(
-                    nn.Conv2d(chan_in, chan_out, 4, stride = 2, padding = 1),
+                    WN(nn.Conv2d(chan_in, chan_out, 4, stride = 2, padding = 1)),
                     nn.LeakyReLU(0.1),
-                    nn.Conv2d(chan_out, chan_out, 3, padding = 1),
+                    WN(nn.Conv2d(chan_out, chan_out, 3, padding = 1)),
                     nn.LeakyReLU(0.1)
                 ),
                 nn.Sequential(
                     nn.AvgPool2d(2),
-                    nn.Conv2d(chan_in, chan_out, 1),
+                    WN(nn.Conv2d(chan_in, chan_out, 1)),
                     nn.LeakyReLU(0.1),
                 ),
                 hamburger
@@ -441,13 +441,13 @@ class Discriminator(nn.Module):
 
         last_chan = features[-1][-1]
         self.to_logits = nn.Sequential(
-            nn.Conv2d(last_chan, last_chan, 1) if disc_output_size == 5 else nn.Conv2d(last_chan, last_chan, 4, stride = 2, padding = 1),
+            WN(nn.Conv2d(last_chan, last_chan, 1)) if disc_output_size == 5 else nn.Conv2d(last_chan, last_chan, 4, stride = 2, padding = 1),
             nn.LeakyReLU(0.1),
             nn.Conv2d(last_chan, 1, 4)
         )
 
         self.decoder1 = SimpleDecoder(chan_in = last_chan, chan_out = init_channel)
-        self.decoder2 = SimpleDecoder(chan_in = features[-2][-1], chan_out = init_channel)
+        self.decoder2 = SimpleDecoder(chan_in = features[-2][-1], chan_out = init_channel) if resolution >= 9 else None
 
     def forward(self, x, calc_aux_loss = False):
         orig_img = x
@@ -476,23 +476,24 @@ class Discriminator(nn.Module):
 
         recon_img_8x8 = self.decoder1(layer_8x8)
 
-        aux_loss1 = F.mse_loss(
+        aux_loss = F.mse_loss(
             recon_img_8x8,
             F.interpolate(orig_img, size = recon_img_8x8.shape[2:])
         )
 
-        select_random_quadrant = lambda rand_quadrant, img: rearrange(img, 'b c (m h) (n w) -> (m n) b c h w', m = 2, n = 2)[rand_quadrant]
-        crop_image_fn = partial(select_random_quadrant, floor(random() * 4))
-        img_part, layer_16x16_part = map(crop_image_fn, (orig_img, layer_16x16))
+        if exists(self.decoder2):
+            select_random_quadrant = lambda rand_quadrant, img: rearrange(img, 'b c (m h) (n w) -> (m n) b c h w', m = 2, n = 2)[rand_quadrant]
+            crop_image_fn = partial(select_random_quadrant, floor(random() * 4))
+            img_part, layer_16x16_part = map(crop_image_fn, (orig_img, layer_16x16))
 
-        recon_img_16x16 = self.decoder2(layer_16x16_part)
+            recon_img_16x16 = self.decoder2(layer_16x16_part)
 
-        aux_loss2 = F.mse_loss(
-            recon_img_16x16,
-            F.interpolate(img_part, size = recon_img_16x16.shape[2:])
-        )
+            aux_loss_16x16 = F.mse_loss(
+                recon_img_16x16,
+                F.interpolate(img_part, size = recon_img_16x16.shape[2:])
+            )
 
-        aux_loss = aux_loss1 + aux_loss2
+            aux_loss = aux_loss + aux_loss_16x16
 
         return out, aux_loss
 
@@ -760,8 +761,6 @@ class Trainer():
         D = self.GAN.D if not self.is_ddp else self.D_ddp
         D_aug = self.GAN.D_aug if not self.is_ddp else self.D_aug_ddp
 
-        apply_gradient_penalty = self.steps % 4 == 0
-
         # train discriminator
 
         self.GAN.D_opt.zero_grad()
@@ -785,10 +784,6 @@ class Trainer():
             aux_loss = real_aux_loss + fake_aux_loss
             disc_loss = disc_loss + aux_loss
 
-            if apply_gradient_penalty:
-                gp = gradient_penalty(image_batch, (real_output,))
-                disc_loss = disc_loss + gp
-
             disc_loss = disc_loss / self.gradient_accumulate_every
             disc_loss.register_hook(raise_if_nan)
             disc_loss.backward()
@@ -797,8 +792,6 @@ class Trainer():
                 total_disc_loss += divergence
 
         self.last_recon_loss = aux_loss.item()
-        if apply_gradient_penalty:
-            self.last_gp_loss = gp.item()
         self.d_loss = float(total_disc_loss.item() / self.gradient_accumulate_every)
         del total_disc_loss
 
@@ -925,7 +918,7 @@ class Trainer():
     @torch.no_grad()
     def generate_truncated(self, G, style, trunc_psi = 0.75, num_image_tiles = 8):
         generated_images = evaluate_in_chunks(self.batch_size, G, style)
-        return generated_images.clamp_(0., 1.)
+        return (generated_images + 1) * 0.5
 
     @torch.no_grad()
     def generate_interpolation(self, num = 0, num_image_tiles = 8, trunc = 1.0, num_steps = 100, save_frames = False):
@@ -968,7 +961,6 @@ class Trainer():
         data = [
             ('G', self.g_loss),
             ('D', self.d_loss),
-            ('GP', self.last_gp_loss),
             ('SS', self.last_recon_loss),
             ('FID', self.last_fid)
         ]
