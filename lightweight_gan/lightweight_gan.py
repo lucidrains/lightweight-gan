@@ -17,6 +17,7 @@ from torch.utils.data import Dataset, DataLoader
 from torch.autograd import grad as torch_grad
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.nn.utils import weight_norm as WN
 
 from PIL import Image
 import torchvision
@@ -305,8 +306,6 @@ class AugWrapper(nn.Module):
 # modifiable global variables
 
 activation_fn = select_activation('leaky_relu')
-norm_class = nn.BatchNorm2d
-conv2d = nn.Conv2d
 
 # classes
 
@@ -346,8 +345,7 @@ class Generator(nn.Module):
         fmap_max = default(fmap_max, latent_dim)
 
         self.initial_conv = nn.Sequential(
-            nn.ConvTranspose2d(latent_dim, latent_dim * 2, 4),
-            norm_class(latent_dim * 2),
+            WN(nn.ConvTranspose2d(latent_dim, latent_dim * 2, 4)),
             nn.GLU(dim = 1)
         )
 
@@ -390,8 +388,7 @@ class Generator(nn.Module):
             layer = nn.ModuleList([
                 nn.Sequential(
                     nn.Upsample(scale_factor = 2),
-                    conv2d(chan_in, chan_out * 2, 3, padding = 1),
-                    norm_class(chan_out * 2),
+                    WN(nn.Conv2d(chan_in, chan_out * 2, 3, padding = 1)),
                     nn.GLU(dim = 1)
                 ),
                 sle,
@@ -442,7 +439,7 @@ class SimpleDecoder(nn.Module):
             chan_out = chans if not last_layer else final_chan * 2
             layer = nn.Sequential(
                 nn.Upsample(scale_factor = 2),
-                conv2d(chans, chan_out, 3, padding = 1),
+                nn.Conv2d(chans, chan_out, 3, padding = 1),
                 nn.GLU(dim = 1)
             )
             self.layers.append(layer)
@@ -487,7 +484,7 @@ class Discriminator(nn.Module):
             chan_out = features[0][-1] if last_layer else init_channel
 
             self.non_residual_layers.append(nn.Sequential(
-                conv2d(init_channel, chan_out, 4, stride = 2, padding = 1),
+                nn.Conv2d(init_channel, chan_out, 4, stride = 2, padding = 1),
                 activation_fn()
             ))
 
@@ -504,14 +501,14 @@ class Discriminator(nn.Module):
 
             self.residual_layers.append(nn.ModuleList([
                 nn.Sequential(
-                    conv2d(chan_in, chan_out, 4, stride = 2, padding = 1),
+                    nn.Conv2d(chan_in, chan_out, 4, stride = 2, padding = 1),
                     activation_fn(),
-                    conv2d(chan_out, chan_out, 3, padding = 1),
+                    nn.Conv2d(chan_out, chan_out, 3, padding = 1),
                     activation_fn()
                 ),
                 nn.Sequential(
                     nn.AvgPool2d(2),
-                    conv2d(chan_in, chan_out, 1),
+                    nn.Conv2d(chan_in, chan_out, 1),
                     activation_fn()
                 ),
                 hamburger
@@ -519,7 +516,7 @@ class Discriminator(nn.Module):
 
         last_chan = features[-1][-1]
         self.to_logits = nn.Sequential(
-            conv2d(last_chan, last_chan, 1),
+            nn.Conv2d(last_chan, last_chan, 1),
             activation_fn(),
             nn.Conv2d(last_chan, 1, 4)
         )
@@ -665,7 +662,6 @@ class Trainer():
         mixed_prob = 0.9,
         gradient_accumulate_every = 1,
         hamburger_res_layers = [],
-        use_evonorm = False,
         lr = 2e-4,
         lr_mlp = 1.,
         ttur_mult = 2,
@@ -716,7 +712,6 @@ class Trainer():
         self.gradient_accumulate_every = gradient_accumulate_every
 
         self.activation = activation
-        self.use_evonorm = use_evonorm
         self.hamburger_res_layers = hamburger_res_layers
 
         self.d_loss = 0
@@ -737,8 +732,6 @@ class Trainer():
         self.rank = rank
         self.world_size = world_size
 
-        self.syncbatchnorm = is_ddp
-
     @property
     def image_extension(self):
         return 'jpg' if not self.transparent else 'png'
@@ -753,20 +746,7 @@ class Trainer():
         # set some global variables before instantiating GAN
 
         global activation_fn
-        global norm_class
-
         activation_fn = select_activation(self.activation)
-        norm_class = nn.BatchNorm2d if not self.use_evonorm else lambda chans: EvoNorm2d(chans, groups = 32) if chans >= 64 else nn.Identity()
-        norm_class = nn.SyncBatchNorm if not self.use_evonorm and self.syncbatchnorm else norm_class
-
-        # handle bugs when
-        # switching from multi-gpu back to single gpu
-
-        if self.syncbatchnorm and not self.is_ddp:
-            import torch.distributed as dist
-            os.environ['MASTER_ADDR'] = 'localhost'
-            os.environ['MASTER_PORT'] = '12355'
-            dist.init_process_group('nccl', rank=0, world_size=1)
 
         # instantiate GAN
 
@@ -797,11 +777,8 @@ class Trainer():
         config = self.config() if not self.config_path.exists() else json.loads(self.config_path.read_text())
         self.image_size = config['image_size']
         self.transparent = config['transparent']
-        self.use_evonorm = config['use_evonorm']
         self.hamburger_res_layers = config['hamburger_res_layers']
-        self.use_evonorm = config['use_evonorm']
         self.activation = config['activation']
-        self.syncbatchnorm = config['syncbatchnorm']
         self.fmap_max = config.pop('fmap_max', 512)
         del self.GAN
         self.init_GAN()
@@ -810,8 +787,6 @@ class Trainer():
         return {
             'image_size': self.image_size,
             'transparent': self.transparent,
-            'use_evonorm': self.use_evonorm,
-            'syncbatchnorm': self.syncbatchnorm,
             'hamburger_res_layers': self.hamburger_res_layers,
             'activation': self.activation
         }
