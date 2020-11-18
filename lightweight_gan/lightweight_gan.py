@@ -461,24 +461,28 @@ class Discriminator(nn.Module):
         fmap_max = 512,
         fmap_inverse_coef = 12,
         transparent = False,
+        disc_output_size = 5,
         hamburger_res_layers = []
     ):
         super().__init__()
         resolution = log2(image_size)
         assert resolution.is_integer(), 'image size must be a power of 2'
+        assert disc_output_size in {1, 5}, 'discriminator output dimensions can only be 5x5 or 1x1'
+
+        resolution = int(resolution)
         init_channel = 4 if transparent else 3
 
         num_non_residual_layers = max(0, int(resolution) - 8)
         num_residual_layers = 8 - 3
 
-        features = list(map(lambda n: (n,  2 ** (fmap_inverse_coef - n)), range(8, 2, -1)))
+        features = list(map(lambda n: (n,  2 ** (fmap_inverse_coef - n)), range(resolution, 2, -1)))
         features = list(map(lambda n: (n[0], min(n[1], fmap_max)), features))
 
         if num_non_residual_layers == 0:
             res, _ = features[0]
             features[0] = (res, init_channel)
 
-        chan_in_out = zip(features[:-1], features[1:])
+        chan_in_out = list(zip(features[:-1], features[1:]))
 
         self.non_residual_layers = nn.ModuleList([])
         for ind in range(num_non_residual_layers):
@@ -492,7 +496,7 @@ class Discriminator(nn.Module):
             ))
 
         self.residual_layers = nn.ModuleList([])
-        for (res, ((_, chan_in), (_, chan_out))) in zip(range(8, 2, -1), chan_in_out):
+        for (res, ((_, chan_in), (_, chan_out))) in zip(range(resolution, 2, -1), chan_in_out):
             image_width = 2 ** resolution
 
             hamburger = None
@@ -519,7 +523,7 @@ class Discriminator(nn.Module):
 
         last_chan = features[-1][-1]
         self.to_logits = nn.Sequential(
-            conv2d(last_chan, last_chan, 1),
+            conv2d(last_chan, last_chan, 1) if disc_output_size == 5 else nn.Conv2d(last_chan, last_chan, 4, stride = 2, padding = 1),
             activation_fn(),
             nn.Conv2d(last_chan, 1, 4)
         )
@@ -583,6 +587,7 @@ class LightweightGAN(nn.Module):
         fmap_max = 512,
         fmap_inverse_coef = 12,
         transparent = False,
+        disc_output_size = 5,
         hamburger_res_layers = [],
         ttur_mult = 1.5,
         lr = 2e-4,
@@ -609,7 +614,8 @@ class LightweightGAN(nn.Module):
             fmap_max = fmap_max,
             fmap_inverse_coef = fmap_inverse_coef,
             transparent = transparent,
-            hamburger_res_layers = hamburger_res_layers
+            hamburger_res_layers = hamburger_res_layers,
+            disc_output_size = disc_output_size
         )
 
         self.ema_updater = EMA(0.995)
@@ -666,6 +672,7 @@ class Trainer():
         gradient_accumulate_every = 1,
         hamburger_res_layers = [],
         use_evonorm = False,
+        disc_output_size = 5,
         lr = 2e-4,
         lr_mlp = 1.,
         ttur_mult = 2,
@@ -718,6 +725,7 @@ class Trainer():
         self.activation = activation
         self.use_evonorm = use_evonorm
         self.hamburger_res_layers = hamburger_res_layers
+        self.disc_output_size = disc_output_size
 
         self.d_loss = 0
         self.g_loss = 0
@@ -777,6 +785,7 @@ class Trainer():
             image_size = self.image_size,
             ttur_mult = self.ttur_mult,
             fmap_max = self.fmap_max,
+            disc_output_size = self.disc_output_size,
             transparent = self.transparent,
             rank = self.rank,
             *args,
