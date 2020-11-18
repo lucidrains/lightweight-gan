@@ -796,11 +796,11 @@ class Trainer():
             if i % log_step == 0:
                 total_disc_loss += divergence
 
-        del total_disc_loss
         self.last_recon_loss = aux_loss.item()
         if apply_gradient_penalty:
             self.last_gp_loss = gp.item()
         self.d_loss = float(total_disc_loss.item() / self.gradient_accumulate_every)
+        del total_disc_loss
 
         self.GAN.D_opt.step()
 
