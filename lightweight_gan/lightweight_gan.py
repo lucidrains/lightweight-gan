@@ -111,86 +111,6 @@ def slerp(val, low, high):
     res = (torch.sin((1.0 - val) * omega) / so).unsqueeze(1) * low + (torch.sin(val * omega) / so).unsqueeze(1) * high
     return res
 
-# activation classes
-
-class Activation(nn.Module):
-    def __init__(self, fn):
-        super().__init__()
-        self.fn = fn
-    def forward(self, x):
-        return self.fn(x)
-
-class MishFn(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, x):
-        x_tanh_sp = torch.nn.functional.softplus(x).tanh()
-        if x.requires_grad:
-            ctx.save_for_backward(x_tanh_sp + x * x.sigmoid() * (1 - x_tanh_sp.square()))
-        y = x * x_tanh_sp
-        return y
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        if len(ctx.saved_tensors) == 0:
-            return None
-        grad, = ctx.saved_tensors
-        return grad_output * grad
-    
-    
-class SwishFn(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, i):
-        with torch.no_grad():
-            sigmoid_i = i.sigmoid()
-            result = i * sigmoid_i
-            if i.requires_grad:
-                grad = sigmoid_i + result * (1 - sigmoid_i)
-                ctx.save_for_backward(grad)
-        result.requires_grad_(i.requires_grad)
-        return result
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        grad, = ctx.saved_tensors
-        return grad_output * grad
-
-def select_activation(name):
-    fn = {
-        'swish': SwishFn.apply,
-        'mish': MishFn.apply,
-        'elu': F.elu,
-        'relu': F.relu,
-        'gelu': F.gelu,
-        'leaky_relu': partial(F.leaky_relu, negative_slope = 0.1)
-    }[name.lower()]
-    return lambda: Activation(fn)
-
-# evonorm
-
-def group_std(x, groups = 32, eps = 1e-5):  
-    shape = x.shape 
-    x = rearrange(x, 'b (g c) h w -> b g c h w', g = groups)    
-    var = torch.var(x, dim = (2, 3, 4), keepdim = True).expand_as(x)    
-    return torch.reshape(torch.sqrt(var + eps), shape)  
-
-class EvoNorm2d(nn.Module): 
-    def __init__(   
-        self,   
-        input,  
-        groups = 32,
-        eps = 1e-5, 
-    ):  
-        super().__init__()  
-        self.eps = eps  
-        self.groups = groups
-        self.gamma = nn.Parameter(torch.ones(1, input, 1, 1))   
-        self.beta = nn.Parameter(torch.zeros(1, input, 1, 1))   
-        self.v = nn.Parameter(torch.ones(1, input, 1, 1))   
-
-    def forward(self, x):   
-        num = x * torch.sigmoid(self.v * x) 
-        return num / group_std(x, groups = self.groups, eps = self.eps) * self.gamma + self.beta
-
 # helper classes
 
 class NanException(Exception):
@@ -304,9 +224,7 @@ class AugWrapper(nn.Module):
 
 # modifiable global variables
 
-activation_fn = select_activation('leaky_relu')
 norm_class = nn.BatchNorm2d
-conv2d = nn.Conv2d
 
 # classes
 
@@ -321,7 +239,7 @@ class SLE(nn.Module):
         self.net = nn.Sequential(
             nn.AdaptiveAvgPool2d((4, 4)),
             nn.Conv2d(chan_in, chan_in, 4),
-            activation_fn(),
+            nn.LeakyReLU(0.1),
             nn.Conv2d(chan_in, chan_out, 1),
             nn.Sigmoid()
         )
@@ -390,7 +308,7 @@ class Generator(nn.Module):
             layer = nn.ModuleList([
                 nn.Sequential(
                     nn.Upsample(scale_factor = 2),
-                    conv2d(chan_in, chan_out * 2, 3, padding = 1),
+                    nn.Conv2d(chan_in, chan_out * 2, 3, padding = 1),
                     norm_class(chan_out * 2),
                     nn.GLU(dim = 1)
                 ),
@@ -442,7 +360,7 @@ class SimpleDecoder(nn.Module):
             chan_out = chans if not last_layer else final_chan * 2
             layer = nn.Sequential(
                 nn.Upsample(scale_factor = 2),
-                conv2d(chans, chan_out, 3, padding = 1),
+                nn.Conv2d(chans, chan_out, 3, padding = 1),
                 nn.GLU(dim = 1)
             )
             self.layers.append(layer)
@@ -491,8 +409,8 @@ class Discriminator(nn.Module):
             chan_out = features[0][-1] if last_layer else init_channel
 
             self.non_residual_layers.append(nn.Sequential(
-                conv2d(init_channel, chan_out, 4, stride = 2, padding = 1),
-                activation_fn()
+                nn.Conv2d(init_channel, chan_out, 4, stride = 2, padding = 1),
+                nn.LeakyReLU(0.1)
             ))
 
         self.residual_layers = nn.ModuleList([])
@@ -508,23 +426,23 @@ class Discriminator(nn.Module):
 
             self.residual_layers.append(nn.ModuleList([
                 nn.Sequential(
-                    conv2d(chan_in, chan_out, 4, stride = 2, padding = 1),
-                    activation_fn(),
-                    conv2d(chan_out, chan_out, 3, padding = 1),
-                    activation_fn()
+                    nn.Conv2d(chan_in, chan_out, 4, stride = 2, padding = 1),
+                    nn.LeakyReLU(0.1),
+                    nn.Conv2d(chan_out, chan_out, 3, padding = 1),
+                    nn.LeakyReLU(0.1)
                 ),
                 nn.Sequential(
                     nn.AvgPool2d(2),
-                    conv2d(chan_in, chan_out, 1),
-                    activation_fn()
+                    nn.Conv2d(chan_in, chan_out, 1),
+                    nn.LeakyReLU(0.1),
                 ),
                 hamburger
             ]))
 
         last_chan = features[-1][-1]
         self.to_logits = nn.Sequential(
-            conv2d(last_chan, last_chan, 1) if disc_output_size == 5 else nn.Conv2d(last_chan, last_chan, 4, stride = 2, padding = 1),
-            activation_fn(),
+            nn.Conv2d(last_chan, last_chan, 1) if disc_output_size == 5 else nn.Conv2d(last_chan, last_chan, 4, stride = 2, padding = 1),
+            nn.LeakyReLU(0.1),
             nn.Conv2d(last_chan, 1, 4)
         )
 
@@ -671,7 +589,6 @@ class Trainer():
         mixed_prob = 0.9,
         gradient_accumulate_every = 1,
         hamburger_res_layers = [],
-        use_evonorm = False,
         disc_output_size = 5,
         lr = 2e-4,
         lr_mlp = 1.,
@@ -687,7 +604,6 @@ class Trainer():
         rank = 0,
         world_size = 1,
         log = False,
-        activation = 'leaky_relu',
         *args,
         **kwargs
     ):
@@ -722,8 +638,6 @@ class Trainer():
 
         self.gradient_accumulate_every = gradient_accumulate_every
 
-        self.activation = activation
-        self.use_evonorm = use_evonorm
         self.hamburger_res_layers = hamburger_res_layers
         self.disc_output_size = disc_output_size
 
@@ -760,12 +674,8 @@ class Trainer():
 
         # set some global variables before instantiating GAN
 
-        global activation_fn
         global norm_class
-
-        activation_fn = select_activation(self.activation)
-        norm_class = nn.BatchNorm2d if not self.use_evonorm else lambda chans: EvoNorm2d(chans, groups = 32) if chans >= 64 else nn.Identity()
-        norm_class = nn.SyncBatchNorm if not self.use_evonorm and self.syncbatchnorm else norm_class
+        norm_class = nn.SyncBatchNorm if self.syncbatchnorm else nn.BatchNorm2d
 
         # handle bugs when
         # switching from multi-gpu back to single gpu
@@ -806,10 +716,7 @@ class Trainer():
         config = self.config() if not self.config_path.exists() else json.loads(self.config_path.read_text())
         self.image_size = config['image_size']
         self.transparent = config['transparent']
-        self.use_evonorm = config['use_evonorm']
         self.hamburger_res_layers = config['hamburger_res_layers']
-        self.use_evonorm = config['use_evonorm']
-        self.activation = config['activation']
         self.syncbatchnorm = config['syncbatchnorm']
         self.fmap_max = config.pop('fmap_max', 512)
         del self.GAN
@@ -819,10 +726,8 @@ class Trainer():
         return {
             'image_size': self.image_size,
             'transparent': self.transparent,
-            'use_evonorm': self.use_evonorm,
             'syncbatchnorm': self.syncbatchnorm,
             'hamburger_res_layers': self.hamburger_res_layers,
-            'activation': self.activation
         }
 
     def set_data_src(self, folder):
