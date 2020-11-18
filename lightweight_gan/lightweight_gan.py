@@ -788,12 +788,10 @@ class Trainer():
             disc_loss.register_hook(raise_if_nan)
             disc_loss.backward()
 
-            if i % log_step == 0:
-                total_disc_loss += divergence
+            total_disc_loss += divergence
 
         self.last_recon_loss = aux_loss.item()
         self.d_loss = float(total_disc_loss.item() / self.gradient_accumulate_every)
-        del total_disc_loss
 
         self.GAN.D_opt.step()
 
@@ -834,6 +832,9 @@ class Trainer():
             print(f'NaN detected for generator or discriminator. Loading from checkpoint #{self.checkpoint_num}')
             self.load(self.checkpoint_num)
             raise NanException
+
+        del total_disc_loss
+        del total_gen_loss
 
         # periodically save results
 
