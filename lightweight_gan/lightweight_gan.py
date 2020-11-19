@@ -245,9 +245,9 @@ class SLE(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.AdaptiveAvgPool2d((4, 4)),
-            nn.Conv2d(chan_in, chan_in, 4),
+            nn.Conv2d(chan_in, chan_out, 4),
             nn.LeakyReLU(0.1),
-            nn.Conv2d(chan_in, chan_out, 1),
+            nn.Conv2d(chan_out, chan_out, 1),
             nn.Sigmoid()
         )
     def forward(self, x):
@@ -289,7 +289,7 @@ class Generator(nn.Module):
         self.res_to_feature_map = dict(zip(self.res_layers, in_out_features))
 
         self.sle_map = ((3, 7), (4, 8), (5, 9), (6, 10))
-        self.sle_map = list(filter(lambda t: t[0] in self.res_layers and t[1] in self.res_layers, self.sle_map))
+        self.sle_map = list(filter(lambda t: t[0] <= resolution and t[1] <= resolution, self.sle_map))
         self.sle_map = dict(self.sle_map)
 
         for (resolution, (chan_in, chan_out)) in zip(self.res_layers, in_out_features):
@@ -305,7 +305,7 @@ class Generator(nn.Module):
             sle = None
             if resolution in self.sle_map:
                 residual_layer = self.sle_map[resolution]
-                sle_chan_out = self.res_to_feature_map[residual_layer][-1]
+                sle_chan_out = self.res_to_feature_map[residual_layer - 1][-1]
 
                 sle = SLE(
                     chan_in = chan_out,
@@ -343,8 +343,9 @@ class Generator(nn.Module):
                 residual = sle(x)
                 residuals[out_res] = residual
 
-            if res in residuals:
-                x = x * residuals[res]
+            next_res = res + 1
+            if next_res in residuals:
+                x = x * residuals[next_res]
 
         return self.out_conv(x).tanh()
 
@@ -523,7 +524,7 @@ class LightweightGAN(nn.Module):
         transparent = False,
         disc_output_size = 5,
         hamburger_res_layers = [],
-        ttur_mult = 1.5,
+        ttur_mult = 1.,
         lr = 2e-4,
         rank = 0,
         ddp = False
@@ -608,7 +609,7 @@ class Trainer():
         disc_output_size = 5,
         lr = 2e-4,
         lr_mlp = 1.,
-        ttur_mult = 2,
+        ttur_mult = 1.,
         save_every = 1000,
         evaluate_every = 1000,
         trunc_psi = 0.6,
