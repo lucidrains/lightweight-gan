@@ -278,7 +278,8 @@ class Generator(nn.Module):
         fmap_max = 512,
         fmap_inverse_coef = 12,
         transparent = False,
-        hamburger_res_layers = []
+        hamburger_res_layers = [],
+        sle_spatial = False
     ):
         super().__init__()
         resolution = log2(image_size)
@@ -328,7 +329,7 @@ class Generator(nn.Module):
                     chan_out = sle_chan_out
                 )
 
-            sle_spatial = SpatialSLE()
+            sle_spatial = SpatialSLE() if sle_spatial else None
 
             layer = nn.ModuleList([
                 nn.Sequential(
@@ -352,7 +353,8 @@ class Generator(nn.Module):
         residuals = dict()
 
         for (res, (up, sle, sle_spatial, hamburger)) in zip(self.res_layers, self.layers):
-            spatial_res = sle_spatial(x)
+            if exists(sle_spatial):
+                spatial_res = sle_spatial(x)
 
             if exists(hamburger):
                 x = hamburger(x) + x
@@ -368,7 +370,8 @@ class Generator(nn.Module):
             if next_res in residuals:
                 x = x * residuals[next_res]
 
-            x = x * spatial_res
+            if exists(sle_spatial):
+                x = x * spatial_res
 
         return self.out_conv(x).tanh()
 
@@ -548,6 +551,7 @@ class LightweightGAN(nn.Module):
         transparent = False,
         disc_output_size = 5,
         hamburger_res_layers = [],
+        sle_spatial = False,
         ttur_mult = 1.,
         lr = 2e-4,
         rank = 0,
@@ -563,7 +567,8 @@ class LightweightGAN(nn.Module):
             fmap_max = fmap_max,
             fmap_inverse_coef = fmap_inverse_coef,
             transparent = transparent,
-            hamburger_res_layers = hamburger_res_layers
+            hamburger_res_layers = hamburger_res_layers,
+            sle_spatial = sle_spatial
         )
 
         self.G = Generator(**G_kwargs)
@@ -637,6 +642,7 @@ class Trainer():
         mixed_prob = 0.9,
         gradient_accumulate_every = 1,
         hamburger_res_layers = [],
+        sle_spatial = False,
         disc_output_size = 5,
         lr = 2e-4,
         lr_mlp = 1.,
@@ -688,6 +694,7 @@ class Trainer():
         self.gradient_accumulate_every = gradient_accumulate_every
 
         self.hamburger_res_layers = hamburger_res_layers
+        self.sle_spatial = sle_spatial
         self.disc_output_size = disc_output_size
 
         self.d_loss = 0
@@ -742,6 +749,7 @@ class Trainer():
             lr = self.lr,
             latent_dim = self.latent_dim,
             hamburger_res_layers = self.hamburger_res_layers,
+            sle_spatial = self.sle_spatial,
             image_size = self.image_size,
             ttur_mult = self.ttur_mult,
             fmap_max = self.fmap_max,
@@ -769,6 +777,7 @@ class Trainer():
         self.hamburger_res_layers = config['hamburger_res_layers']
         self.syncbatchnorm = config['syncbatchnorm']
         self.disc_output_size = config['disc_output_size']
+        self.sle_spatial = config.pop('sle_spatial', False)
         self.optimizer = config.pop('optimizer', 'adam')
         self.fmap_max = config.pop('fmap_max', 512)
         del self.GAN
@@ -782,6 +791,7 @@ class Trainer():
             'disc_output_size': self.disc_output_size,
             'optimizer': self.optimizer,
             'hamburger_res_layers': self.hamburger_res_layers,
+            'sle_spatial': self.sle_spatial
         }
 
     def set_data_src(self, folder):
