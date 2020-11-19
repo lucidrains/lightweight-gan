@@ -27,6 +27,7 @@ setup(
     'einops>=0.3',
     'fire',
     'hamburger-pytorch',
+    'adabelief-pytorch',
     'numpy',
     'pillow',
     'pytorch-fid',

@@ -31,6 +31,8 @@ from pytorch_fid import fid_score
 
 from hamburger_pytorch import Hamburger
 
+from adabelief_pytorch import AdaBelief
+
 # asserts
 
 assert torch.cuda.is_available(), 'You need to have an Nvidia GPU with CUDA installed.'
@@ -519,6 +521,7 @@ class LightweightGAN(nn.Module):
         *,
         latent_dim,
         image_size,
+        optimizer = "adam",
         fmap_max = 512,
         fmap_inverse_coef = 12,
         transparent = False,
@@ -558,8 +561,14 @@ class LightweightGAN(nn.Module):
         set_requires_grad(self.GE, False)
 
 
-        self.G_opt = Adam(self.G.parameters(), lr = lr, betas=(0.5, 0.9))
-        self.D_opt = Adam(self.D.parameters(), lr = lr * ttur_mult, betas=(0.5, 0.9))
+        if optimizer == "adam":
+            self.G_opt = Adam(self.G.parameters(), lr = lr, betas=(0.5, 0.9))
+            self.D_opt = Adam(self.D.parameters(), lr = lr * ttur_mult, betas=(0.5, 0.9))
+        elif optimizer == "adabelief":
+            self.G_opt = AdaBelief(self.G.parameters(), lr = lr, betas=(0.5, 0.9))
+            self.D_opt = AdaBelief(self.D.parameters(), lr = lr * ttur_mult, betas=(0.5, 0.9))
+        else:
+            assert False, "No valid optimizer is given"
 
         self.apply(self._init_weights)
         self.reset_parameter_averaging()
@@ -598,6 +607,7 @@ class Trainer():
         results_dir = 'results',
         models_dir = 'models',
         base_dir = './',
+        optimizer="adam",
         latent_dim = 256,
         image_size = 128,
         fmap_max = 512,
@@ -636,6 +646,7 @@ class Trainer():
         self.config_path = self.models_dir / name / '.config.json'
 
         assert log2(image_size).is_integer(), 'image size must be a power of 2 (64, 128, 256, 512, 1024)'
+        self.optimizer = optimizer
         self.latent_dim = latent_dim
         self.image_size = image_size
         self.fmap_max = fmap_max
@@ -706,6 +717,7 @@ class Trainer():
         # instantiate GAN
 
         self.GAN = LightweightGAN(
+            optimizer=self.optimizer,
             lr = self.lr,
             latent_dim = self.latent_dim,
             hamburger_res_layers = self.hamburger_res_layers,
