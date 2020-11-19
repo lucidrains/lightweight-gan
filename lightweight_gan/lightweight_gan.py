@@ -747,6 +747,8 @@ class Trainer():
         self.transparent = config['transparent']
         self.hamburger_res_layers = config['hamburger_res_layers']
         self.syncbatchnorm = config['syncbatchnorm']
+        self.disc_output_size = config['disc_output_size']
+        self.optimizer = config.pop('optimizer', 'adam')
         self.fmap_max = config.pop('fmap_max', 512)
         del self.GAN
         self.init_GAN()
@@ -756,6 +758,8 @@ class Trainer():
             'image_size': self.image_size,
             'transparent': self.transparent,
             'syncbatchnorm': self.syncbatchnorm,
+            'disc_output_size': self.disc_output_size,
+            'optimizer': self.optimizer,
             'hamburger_res_layers': self.hamburger_res_layers,
         }
 
