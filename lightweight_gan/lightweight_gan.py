@@ -567,6 +567,8 @@ class LightweightGAN(nn.Module):
         elif optimizer == "adabelief":
             self.G_opt = AdaBelief(self.G.parameters(), lr = lr, betas=(0.5, 0.9))
             self.D_opt = AdaBelief(self.D.parameters(), lr = lr * ttur_mult, betas=(0.5, 0.9))
+        else:
+            assert False, "No valid optimizer is given"
 
         self.apply(self._init_weights)
         self.reset_parameter_averaging()
