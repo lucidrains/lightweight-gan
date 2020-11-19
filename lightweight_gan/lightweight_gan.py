@@ -17,7 +17,6 @@ from torch.utils.data import Dataset, DataLoader
 from torch.autograd import grad as torch_grad
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.nn.utils import spectral_norm as SN
 
 from PIL import Image
 import torchvision
@@ -87,6 +86,15 @@ def gradient_accumulate_contexts(gradient_accumulate_every, is_ddp, ddps):
     for context in contexts:
         with context():
             yield
+
+def gradient_penalty(images, outputs, weight = 10):
+    batch_size = images.shape[0]
+    gradients = torch_grad(outputs=outputs, inputs=images,
+                           grad_outputs=list(map(lambda t: torch.ones(t.size(), device = images.device), outputs)),
+                           create_graph=True, retain_graph=True, only_inputs=True)[0]
+
+    gradients = gradients.reshape(batch_size, -1)
+    return weight * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
 
 def evaluate_in_chunks(max_batch_size, model, *args):
     split_args = list(zip(*list(map(lambda x: x.split(max_batch_size, dim=0), args))))
@@ -426,14 +434,14 @@ class Discriminator(nn.Module):
 
             self.residual_layers.append(nn.ModuleList([
                 nn.Sequential(
-                    SN(nn.Conv2d(chan_in, chan_out, 4, stride = 2, padding = 1)),
+                    nn.Conv2d(chan_in, chan_out, 4, stride = 2, padding = 1),
                     nn.LeakyReLU(0.1),
-                    SN(nn.Conv2d(chan_out, chan_out, 3, padding = 1)),
+                    nn.Conv2d(chan_out, chan_out, 3, padding = 1),
                     nn.LeakyReLU(0.1)
                 ),
                 nn.Sequential(
                     nn.AvgPool2d(2),
-                    SN(nn.Conv2d(chan_in, chan_out, 1)),
+                    nn.Conv2d(chan_in, chan_out, 1),
                     nn.LeakyReLU(0.1),
                 ),
                 hamburger
@@ -442,13 +450,13 @@ class Discriminator(nn.Module):
         last_chan = features[-1][-1]
         if disc_output_size == 5:
             self.to_logits = nn.Sequential(
-                SN(nn.Conv2d(last_chan, last_chan, 1)),
+                nn.Conv2d(last_chan, last_chan, 1),
                 nn.LeakyReLU(0.1),
                 nn.Conv2d(last_chan, 1, 4)
             )
         elif disc_output_size == 1:
             self.to_logits = nn.Sequential(
-                SN(nn.Conv2d(last_chan, last_chan, 3, stride = 2, padding = 1)),
+                nn.Conv2d(last_chan, last_chan, 3, stride = 2, padding = 1),
                 nn.LeakyReLU(0.1),
                 nn.Conv2d(last_chan, 1, 4)
             )
@@ -768,6 +776,8 @@ class Trainer():
         D = self.GAN.D if not self.is_ddp else self.D_ddp
         D_aug = self.GAN.D_aug if not self.is_ddp else self.D_aug_ddp
 
+        apply_gradient_penalty = self.steps % 4 == 0
+
         # train discriminator
 
         self.GAN.D_opt.zero_grad()
@@ -790,6 +800,11 @@ class Trainer():
 
             aux_loss = real_aux_loss + fake_aux_loss
             disc_loss = disc_loss + aux_loss
+
+            if apply_gradient_penalty:
+                gp = gradient_penalty(image_batch, (real_output,))
+                self.last_gp_loss = gp.clone().detach().item()
+                disc_loss = disc_loss + gp
 
             disc_loss = disc_loss / self.gradient_accumulate_every
             disc_loss.register_hook(raise_if_nan)
@@ -969,6 +984,7 @@ class Trainer():
         data = [
             ('G', self.g_loss),
             ('D', self.d_loss),
+            ('GP', self.last_gp_loss),
             ('SS', self.last_recon_loss),
             ('FID', self.last_fid)
         ]
