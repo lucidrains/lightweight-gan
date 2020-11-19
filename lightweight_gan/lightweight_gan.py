@@ -255,6 +255,20 @@ class SLE(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+class SpatialSLE(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.ConvTranspose2d(2, 4, 4, stride = 2, padding = 1),
+            nn.LeakyReLU(0.1),
+            nn.Conv2d(4, 1, 3, padding = 1),
+            nn.Sigmoid()
+        )
+    def forward(self, x):
+        max_pool, _ = x.max(dim = 1, keepdim = True)
+        avg_pool = x.mean(dim = 1, keepdim = True)
+        return self.net(torch.cat((max_pool, avg_pool), dim = 1))
+
 class Generator(nn.Module):
     def __init__(
         self,
@@ -314,6 +328,8 @@ class Generator(nn.Module):
                     chan_out = sle_chan_out
                 )
 
+            sle_spatial = SpatialSLE()
+
             layer = nn.ModuleList([
                 nn.Sequential(
                     upsample(),
@@ -322,6 +338,7 @@ class Generator(nn.Module):
                     nn.GLU(dim = 1)
                 ),
                 sle,
+                sle_spatial,
                 hamburger
             ])
             self.layers.append(layer)
@@ -334,7 +351,9 @@ class Generator(nn.Module):
 
         residuals = dict()
 
-        for (res, (up, sle, hamburger)) in zip(self.res_layers, self.layers):
+        for (res, (up, sle, sle_spatial, hamburger)) in zip(self.res_layers, self.layers):
+            spatial_res = sle_spatial(x)
+
             if exists(hamburger):
                 x = hamburger(x) + x
 
@@ -348,6 +367,8 @@ class Generator(nn.Module):
             next_res = res + 1
             if next_res in residuals:
                 x = x * residuals[next_res]
+
+            x = x * spatial_res
 
         return self.out_conv(x).tanh()
 
