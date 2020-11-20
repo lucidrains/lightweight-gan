@@ -697,13 +697,14 @@ class Trainer():
         self.lr = lr
         self.ttur_mult = ttur_mult
         self.batch_size = batch_size
-        self.mixed_prob = mixed_prob
+        self.gradient_accumulate_every = gradient_accumulate_every
 
         self.evaluate_every = evaluate_every
         self.save_every = save_every
         self.steps = 0
 
-        self.gradient_accumulate_every = gradient_accumulate_every
+        self.generator_top_k_gamma = 0.99
+        self.generator_top_k_frac = 0.5
 
         self.hamburger_res_layers = hamburger_res_layers
         self.sle_spatial = sle_spatial
@@ -885,7 +886,14 @@ class Trainer():
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
             generated_images = G(latents)
             fake_output, _ = D_aug(generated_images, **aug_kwargs)
-            fake_output_loss = fake_output
+            fake_output_loss = fake_output.mean(dim = 1)
+
+            epochs = (self.steps * batch_size * self.gradient_accumulate_every) / len(self.dataset)
+            k_frac = max(self.generator_top_k_gamma ** epochs, self.generator_top_k_frac)
+            k = math.ceil(batch_size * k_frac)
+
+            if k != batch_size:
+                fake_output_loss, _ = fake_output_loss.topk(k=k, largest=False)
 
             loss = fake_output_loss.mean()
             gen_loss = loss

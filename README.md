@@ -56,3 +56,14 @@ $ lightweight_gan --data ./path/to/images --image-size 512 --aug-prob 0.2
     primaryClass={cs.CV}
 }
 ```
+
+```bibtex
+@misc{sinha2020topk,
+    title={Top-k Training of GANs: Improving GAN Performance by Throwing Away Bad Samples},
+    author={Samarth Sinha and Zhengli Zhao and Anirudh Goyal and Colin Raffel and Augustus Odena},
+    year={2020},
+    eprint={2002.06224},
+    archivePrefix={arXiv},
+    primaryClass={stat.ML}
+}
+```
