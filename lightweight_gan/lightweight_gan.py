@@ -30,7 +30,6 @@ from einops import rearrange
 from pytorch_fid import fid_score
 
 from hamburger_pytorch import Hamburger
-
 from adabelief_pytorch import AdaBelief
 
 # asserts
@@ -263,23 +262,24 @@ class SLE(nn.Module):
 class SpatialSLE(nn.Module):
     def __init__(self):
         super().__init__()
-        self.avg_pool = nn.AdaptiveAvgPool1d(4)
-        self.max_pool = nn.AdaptiveMaxPool1d(4)
-
         self.net = nn.Sequential(
-            nn.ConvTranspose2d(8, 4, 4, stride = 2, padding = 1),
+            upsample(),
+            nn.Conv2d(8, 4, 3, padding = 1),
             nn.LeakyReLU(0.1),
             nn.Conv2d(4, 1, 3, padding = 1),
             nn.Sigmoid()
         )
     def forward(self, x):
         b, c, h, w = x.shape
-        seq = rearrange(x, 'b c h w -> b (h w) c')
-        pooled_avg = self.avg_pool(seq)
-        pooled_max = self.max_pool(seq)
-        pooled_seq = torch.cat((pooled_avg, pooled_max), dim = 2)
-        x = rearrange(pooled_seq, 'b (h w) c -> b c h w', h = h, w = w)
-        return self.net(x)
+        mult = math.ceil(c / 4)
+        padding = (mult - c % mult) // 2
+        x_padded = F.pad(x, (0, 0, 0, 0, padding, padding))
+        x = rearrange(x, 'b (g c) h w -> b g c h w', g = 4)
+
+        pooled_avg = x.mean(dim = 2)
+        pooled_max, _ = x.max(dim = 2)
+        pooled = torch.cat((pooled_avg, pooled_max), dim = 1)
+        return self.net(pooled)
 
 class Generator(nn.Module):
     def __init__(
