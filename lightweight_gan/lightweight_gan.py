@@ -245,15 +245,20 @@ class SLE(nn.Module):
         chan_out
     ):
         super().__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d((4, 4))
+        self.max_pool = nn.AdaptiveMaxPool2d((4, 4))
+
+        chan_intermediate = chan_in // 2
         self.net = nn.Sequential(
-            nn.AdaptiveAvgPool2d((4, 4)),
-            nn.Conv2d(chan_in, chan_out, 4),
+            nn.Conv2d(chan_in * 2, chan_intermediate, 4),
             nn.LeakyReLU(0.1),
-            nn.Conv2d(chan_out, chan_out, 1),
+            nn.Conv2d(chan_intermediate, chan_out, 1),
             nn.Sigmoid()
         )
     def forward(self, x):
-        return self.net(x)
+        pooled_avg = self.avg_pool(x)
+        pooled_max = self.max_pool(x)
+        return self.net(torch.cat((pooled_max, pooled_avg), dim = 1))
 
 class SpatialSLE(nn.Module):
     def __init__(self):
@@ -265,9 +270,9 @@ class SpatialSLE(nn.Module):
             nn.Sigmoid()
         )
     def forward(self, x):
-        max_pool, _ = x.max(dim = 1, keepdim = True)
-        avg_pool = x.mean(dim = 1, keepdim = True)
-        return self.net(torch.cat((max_pool, avg_pool), dim = 1))
+        pooled_max, _ = x.max(dim = 1, keepdim = True)
+        pooled_avg = x.mean(dim = 1, keepdim = True)
+        return self.net(torch.cat((pooled_max, pooled_avg), dim = 1))
 
 class Generator(nn.Module):
     def __init__(
