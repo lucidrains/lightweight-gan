@@ -173,9 +173,6 @@ def resize_to_minimum_size(min_size, image):
         return torchvision.transforms.functional.resize(image, min_size)
     return image
 
-def normalize_image(img):
-    return img * 2 - 1
-
 class ImageDataset(Dataset):
     def __init__(self, folder, image_size, transparent = False, aug_prob = 0.):
         super().__init__()
@@ -193,8 +190,7 @@ class ImageDataset(Dataset):
             transforms.Resize(image_size),
             RandomApply(aug_prob, transforms.RandomResizedCrop(image_size, scale=(0.5, 1.0), ratio=(0.98, 1.02)), transforms.CenterCrop(image_size)),
             transforms.ToTensor(),
-            transforms.Lambda(expand_greyscale(transparent)),
-            transforms.Lambda(normalize_image)
+            transforms.Lambda(expand_greyscale(transparent))
         ])
 
     def __len__(self):
@@ -231,8 +227,8 @@ class AugWrapper(nn.Module):
 
 norm_class = nn.BatchNorm2d
 
-def upsample():
-    return nn.Upsample(scale_factor = 2)
+def upsample(scale_factor = 2):
+    return nn.Upsample(scale_factor = scale_factor)
 
 # classes
 
@@ -260,21 +256,23 @@ class SLE(nn.Module):
         return self.net(torch.cat((pooled_max, pooled_avg), dim = 1))
 
 class SpatialSLE(nn.Module):
-    def __init__(self):
+    def __init__(self, upsample_times):
         super().__init__()
         self.net = nn.Sequential(
-            upsample(),
-            nn.Conv2d(8, 4, 3, padding = 1),
+            nn.Conv2d(4, 4, 3, padding = 1),
+            upsample(2 ** upsample_times),
+            nn.Conv2d(4, 4, 3, padding = 1),
             nn.LeakyReLU(0.1),
             nn.Conv2d(4, 1, 3, padding = 1),
             nn.Sigmoid()
         )
     def forward(self, x):
         b, c, h, w = x.shape
-        mult = math.ceil(c / 4)
+        num_groups = 2
+        mult = math.ceil(c / num_groups)
         padding = (mult - c % mult) // 2
         x_padded = F.pad(x, (0, 0, 0, 0, padding, padding))
-        x = rearrange(x, 'b (g c) h w -> b g c h w', g = 4)
+        x = rearrange(x, 'b (g c) h w -> b g c h w', g = num_groups)
 
         pooled_avg = x.mean(dim = 2)
         pooled_max, _ = x.max(dim = 2)
@@ -321,8 +319,10 @@ class Generator(nn.Module):
         self.sle_map = list(filter(lambda t: t[0] <= resolution and t[1] <= resolution, self.sle_map))
         self.sle_map = dict(self.sle_map)
 
-        for (resolution, (chan_in, chan_out)) in zip(self.res_layers, in_out_features):
-            image_width = 2 ** resolution
+        self.num_layers_spatial_res = 4
+
+        for (res, (chan_in, chan_out)) in zip(self.res_layers, in_out_features):
+            image_width = 2 ** res
 
             hamburger = None
             if image_width in hamburger_res_layers:
@@ -332,8 +332,8 @@ class Generator(nn.Module):
                 )
 
             sle = None
-            if resolution in self.sle_map:
-                residual_layer = self.sle_map[resolution]
+            if res in self.sle_map:
+                residual_layer = self.sle_map[res]
                 sle_chan_out = self.res_to_feature_map[residual_layer - 1][-1]
 
                 sle = SLE(
@@ -341,7 +341,9 @@ class Generator(nn.Module):
                     chan_out = sle_chan_out
                 )
 
-            sle_spatial = SpatialSLE() if sle_spatial else None
+            sle_spatial = None
+            if res <= (resolution - self.num_layers_spatial_res):
+                sle_spatial = SpatialSLE(upsample_times = self.num_layers_spatial_res)
 
             layer = nn.ModuleList([
                 nn.Sequential(
@@ -361,12 +363,15 @@ class Generator(nn.Module):
     def forward(self, x):
         x = rearrange(x, 'b c -> b c () ()')
         x = self.initial_conv(x)
+        x = F.normalize(x, dim = -1)
 
         residuals = dict()
+        spatial_residuals = dict()
 
         for (res, (up, sle, sle_spatial, hamburger)) in zip(self.res_layers, self.layers):
             if exists(sle_spatial):
                 spatial_res = sle_spatial(x)
+                spatial_residuals[res + self.num_layers_spatial_res] = spatial_res
 
             if exists(hamburger):
                 x = hamburger(x) + x
@@ -382,10 +387,10 @@ class Generator(nn.Module):
             if next_res in residuals:
                 x = x * residuals[next_res]
 
-            if exists(sle_spatial):
-                x = x * spatial_res
+            if next_res in spatial_residuals:
+                x = x * spatial_residuals[next_res]
 
-        return self.out_conv(x).tanh()
+        return self.out_conv(x)
 
 class SimpleDecoder(nn.Module):
     def __init__(
@@ -1009,7 +1014,7 @@ class Trainer():
     @torch.no_grad()
     def generate_truncated(self, G, style, trunc_psi = 0.75, num_image_tiles = 8):
         generated_images = evaluate_in_chunks(self.batch_size, G, style)
-        return (generated_images + 1) * 0.5
+        return generated_images.clamp_(0., 1.)
 
     @torch.no_grad()
     def generate_interpolation(self, num = 0, num_image_tiles = 8, trunc = 1.0, num_steps = 100, save_frames = False):
