@@ -29,8 +29,8 @@ from tqdm import tqdm
 from einops import rearrange
 from pytorch_fid import fid_score
 
-from hamburger_pytorch import Hamburger
 from adabelief_pytorch import AdaBelief
+from gsa_pytorch import GSA
 
 # asserts
 
@@ -135,6 +135,15 @@ class RandomApply(nn.Module):
     def forward(self, x):
         fn = self.fn if random() < self.prob else self.fn_else
         return fn(x)
+
+class Rezero(nn.Module):
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+        self.g = nn.Parameter(torch.tensor(1e-3))
+
+    def forward(self, x):
+        return self.g * self.fn(x)
 
 # dataset
 
@@ -288,7 +297,7 @@ class Generator(nn.Module):
         fmap_max = 512,
         fmap_inverse_coef = 12,
         transparent = False,
-        hamburger_res_layers = [],
+        attn_res_layers = [],
         sle_spatial = False
     ):
         super().__init__()
@@ -319,17 +328,14 @@ class Generator(nn.Module):
         self.sle_map = list(filter(lambda t: t[0] <= resolution and t[1] <= resolution, self.sle_map))
         self.sle_map = dict(self.sle_map)
 
-        self.num_layers_spatial_res = 4
+        self.num_layers_spatial_res = 2
 
         for (res, (chan_in, chan_out)) in zip(self.res_layers, in_out_features):
             image_width = 2 ** res
 
-            hamburger = None
-            if image_width in hamburger_res_layers:
-                hamburger = Hamburger(
-                    dim = chan_in,
-                    n = image_width ** 2
-                )
+            attn = None
+            if image_width in attn_res_layers:
+                attn = Rezero(GSA(dim = chan_in, rel_pos_length = image_width))
 
             sle = None
             if res in self.sle_map:
@@ -354,7 +360,7 @@ class Generator(nn.Module):
                 ),
                 sle,
                 sle_spatial,
-                hamburger
+                attn
             ])
             self.layers.append(layer)
 
@@ -368,13 +374,13 @@ class Generator(nn.Module):
         residuals = dict()
         spatial_residuals = dict()
 
-        for (res, (up, sle, sle_spatial, hamburger)) in zip(self.res_layers, self.layers):
+        for (res, (up, sle, sle_spatial, attn)) in zip(self.res_layers, self.layers):
             if exists(sle_spatial):
                 spatial_res = sle_spatial(x)
                 spatial_residuals[res + self.num_layers_spatial_res] = spatial_res
 
-            if exists(hamburger):
-                x = hamburger(x) + x
+            if exists(attn):
+                x = attn(x) + x
 
             x = up(x)
 
@@ -431,7 +437,7 @@ class Discriminator(nn.Module):
         fmap_inverse_coef = 12,
         transparent = False,
         disc_output_size = 5,
-        hamburger_res_layers = []
+        attn_res_layers = []
     ):
         super().__init__()
         resolution = log2(image_size)
@@ -466,15 +472,13 @@ class Discriminator(nn.Module):
             ))
 
         self.residual_layers = nn.ModuleList([])
+
         for (res, ((_, chan_in), (_, chan_out))) in zip(non_residual_resolutions, chan_in_out):
             image_width = 2 ** resolution
 
-            hamburger = None
-            if image_width in hamburger_res_layers:
-                hamburger = Hamburger(
-                    dim = chan_in,
-                    n = image_width ** 2
-                )
+            attn = None
+            if image_width in attn_res_layers:
+                attn = Rezero(GSA(dim = chan_in, batch_norm = False, rel_pos_length = image_width))
 
             self.residual_layers.append(nn.ModuleList([
                 nn.Sequential(
@@ -488,7 +492,7 @@ class Discriminator(nn.Module):
                     nn.Conv2d(chan_in, chan_out, 1),
                     nn.LeakyReLU(0.1),
                 ),
-                hamburger
+                attn
             ]))
 
         last_chan = features[-1][-1]
@@ -516,9 +520,9 @@ class Discriminator(nn.Module):
 
         layer_outputs = []
 
-        for (layer, residual_layer, hamburger) in self.residual_layers:
-            if exists(hamburger):
-                x = hamburger(x) + x
+        for (layer, residual_layer, attn) in self.residual_layers:
+            if exists(attn):
+                x = attn(x) + x
 
             x = layer(x) + residual_layer(x)
             layer_outputs.append(x)
@@ -567,7 +571,7 @@ class LightweightGAN(nn.Module):
         fmap_inverse_coef = 12,
         transparent = False,
         disc_output_size = 5,
-        hamburger_res_layers = [],
+        attn_res_layers = [],
         sle_spatial = False,
         ttur_mult = 1.,
         lr = 2e-4,
@@ -584,7 +588,7 @@ class LightweightGAN(nn.Module):
             fmap_max = fmap_max,
             fmap_inverse_coef = fmap_inverse_coef,
             transparent = transparent,
-            hamburger_res_layers = hamburger_res_layers,
+            attn_res_layers = attn_res_layers,
             sle_spatial = sle_spatial
         )
 
@@ -595,7 +599,7 @@ class LightweightGAN(nn.Module):
             fmap_max = fmap_max,
             fmap_inverse_coef = fmap_inverse_coef,
             transparent = transparent,
-            hamburger_res_layers = hamburger_res_layers,
+            attn_res_layers = attn_res_layers,
             disc_output_size = disc_output_size
         )
 
@@ -658,7 +662,7 @@ class Trainer():
         batch_size = 4,
         mixed_prob = 0.9,
         gradient_accumulate_every = 1,
-        hamburger_res_layers = [],
+        attn_res_layers = [],
         sle_spatial = False,
         disc_output_size = 5,
         lr = 2e-4,
@@ -711,7 +715,7 @@ class Trainer():
         self.generator_top_k_gamma = 0.99
         self.generator_top_k_frac = 0.5
 
-        self.hamburger_res_layers = hamburger_res_layers
+        self.attn_res_layers = attn_res_layers
         self.sle_spatial = sle_spatial
         self.disc_output_size = disc_output_size
 
@@ -766,7 +770,7 @@ class Trainer():
             optimizer=self.optimizer,
             lr = self.lr,
             latent_dim = self.latent_dim,
-            hamburger_res_layers = self.hamburger_res_layers,
+            attn_res_layers = self.attn_res_layers,
             sle_spatial = self.sle_spatial,
             image_size = self.image_size,
             ttur_mult = self.ttur_mult,
@@ -792,7 +796,7 @@ class Trainer():
         config = self.config() if not self.config_path.exists() else json.loads(self.config_path.read_text())
         self.image_size = config['image_size']
         self.transparent = config['transparent']
-        self.hamburger_res_layers = config['hamburger_res_layers']
+        self.attn_res_layers = config['attn_res_layers']
         self.syncbatchnorm = config['syncbatchnorm']
         self.disc_output_size = config['disc_output_size']
         self.sle_spatial = config.pop('sle_spatial', False)
@@ -808,7 +812,7 @@ class Trainer():
             'syncbatchnorm': self.syncbatchnorm,
             'disc_output_size': self.disc_output_size,
             'optimizer': self.optimizer,
-            'hamburger_res_layers': self.hamburger_res_layers,
+            'attn_res_layers': self.attn_res_layers,
             'sle_spatial': self.sle_spatial
         }
 

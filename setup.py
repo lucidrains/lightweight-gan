@@ -24,10 +24,10 @@ setup(
     'generative adversarial networks'
   ],
   install_requires=[
+    'adabelief-pytorch',
     'einops>=0.3',
     'fire',
-    'hamburger-pytorch',
-    'adabelief-pytorch',
+    'gsa_pytorch',
     'numpy',
     'pillow',
     'pytorch-fid',
