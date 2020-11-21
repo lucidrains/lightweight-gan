@@ -932,7 +932,7 @@ class Trainer():
             if self.steps % self.save_every == 0:
                 self.save(self.checkpoint_num)
 
-            if self.steps % self.evaluate_every == 0 or (self.steps % 100 == 0 and self.steps < 2500):
+            if self.steps % self.evaluate_every == 0 or (self.steps % 100 == 0 and self.steps < 20000):
                 self.evaluate(floor(self.steps / self.evaluate_every))
 
             if exists(self.calculate_fid_every) and self.steps % self.calculate_fid_every == 0 and self.steps != 0:

@@ -1,3 +1,7 @@
+<img src="./sample.jpg" width="600px"></img>
+
+*512x512 flowers after a day of training*
+
 ## 'Lightweight' GAN
 
 [![PyPI version](https://badge.fury.io/py/lightweight-gan.svg)](https://badge.fury.io/py/lightweight-gan)
@@ -15,10 +19,6 @@ $ pip install lightweight-gan
 ```bash
 $ lightweight_gan --data ./path/to/images --image-size 512 --aug-prob 0.2
 ```
-
-## Status
-
-512x512 Oxford flowers in progress, results pending. Feel free to try yourself in the interim.
 
 ## Citations
 
