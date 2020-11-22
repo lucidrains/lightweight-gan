@@ -4,7 +4,7 @@
 
 <img src="./sample-256.jpg" width="400px"></img>
 
-*256x256 flowers after 9 hours of training, 1 gpu*
+*256x256 flowers after 12 hours of training, 1 gpu*
 
 ## 'Lightweight' GAN
 
