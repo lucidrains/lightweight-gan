@@ -1,6 +1,10 @@
 <img src="./sample.jpg" width="600px"></img>
 
-*512x512 flowers after a day of training*
+*512x512 flowers after a day of training, 1 gpu*
+
+<img src="./sample-256.jpg" width="400px"></img>
+
+*256x256 flowers after 9 hours of training, 1 gpu*
 
 ## 'Lightweight' GAN
 
