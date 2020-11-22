@@ -26,6 +26,15 @@ $ lightweight_gan --data ./path/to/images --image-size 512 --aug-prob 0.2
 
 Model will be saved to `./models/{name}` every 1000 iterations, and samples from the model saved to `./results/{name}`. `name` will be `default`, by default.
 
+## Discriminator output size
+
+The author has kindly let me know that the discriminator output size (5x5 vs 1x1) leads to different results on different datasets. (5x5 works better for art than for faces, as an example). You can toggle this with a single flag
+
+```bash
+# disc output size is by default 1x1
+$ lightweight_gan --data ./path/to/art --image-size 512 --disc-output-size 5
+```
+
 ## Attention
 
 You can add linear + axial attention to specific resolution layers with the following
