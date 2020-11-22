@@ -59,6 +59,9 @@ def combine_contexts(contexts):
             yield [stack.enter_context(ctx()) for ctx in contexts]
     return multi_contexts
 
+def is_power_of_two(val):
+    return log2(val).is_integer()
+
 def default(val, d):
     return val if exists(val) else d
 
@@ -302,7 +305,7 @@ class Generator(nn.Module):
     ):
         super().__init__()
         resolution = log2(image_size)
-        assert resolution.is_integer(), 'image size must be a power of 2'
+        assert is_power_of_two(resolution), 'image size must be a power of 2'
         init_channel = 4 if transparent else 3
         fmap_max = default(fmap_max, latent_dim)
 
@@ -441,7 +444,7 @@ class Discriminator(nn.Module):
     ):
         super().__init__()
         resolution = log2(image_size)
-        assert resolution.is_integer(), 'image size must be a power of 2'
+        assert is_power_of_two(resolution), 'image size must be a power of 2'
         assert disc_output_size in {1, 5}, 'discriminator output dimensions can only be 5x5 or 1x1'
 
         resolution = int(resolution)
@@ -693,7 +696,9 @@ class Trainer():
         self.models_dir = base_dir / models_dir
         self.config_path = self.models_dir / name / '.config.json'
 
-        assert log2(image_size).is_integer(), 'image size must be a power of 2 (64, 128, 256, 512, 1024)'
+        assert is_power_of_two(image_size), 'image size must be a power of 2 (64, 128, 256, 512, 1024)'
+        assert all(map(is_power_of_two, attn_res_layers)), 'resolution layers of attention must all be powers of 2 (16, 32, 64, 128, 256, 512)'
+
         self.optimizer = optimizer
         self.latent_dim = latent_dim
         self.image_size = image_size
@@ -796,9 +801,9 @@ class Trainer():
         config = self.config() if not self.config_path.exists() else json.loads(self.config_path.read_text())
         self.image_size = config['image_size']
         self.transparent = config['transparent']
-        self.attn_res_layers = config['attn_res_layers']
         self.syncbatchnorm = config['syncbatchnorm']
         self.disc_output_size = config['disc_output_size']
+        self.attn_res_layers = config.pop('attn_res_layers', [])
         self.sle_spatial = config.pop('sle_spatial', False)
         self.optimizer = config.pop('optimizer', 'adam')
         self.fmap_max = config.pop('fmap_max', 512)

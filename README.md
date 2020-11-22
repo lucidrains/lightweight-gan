@@ -20,6 +20,17 @@ $ pip install lightweight-gan
 $ lightweight_gan --data ./path/to/images --image-size 512 --aug-prob 0.2
 ```
 
+Model will be saved to `./models/{name}` every 1000 iterations, and samples from the model saved to `./results/{name}`. `name` will be `default`, by default.
+
+## Attention
+
+You can add linear + axial attention to specific resolution layers with the following
+
+```bash
+# make sure there are no spaces between the values within the brackets []
+$ lightweight_gan --data ./path/to/images --image-size 512 --attn-res-layers [32,64]
+```
+
 ## Citations
 
 ```bibtex
