@@ -305,7 +305,7 @@ class Generator(nn.Module):
     ):
         super().__init__()
         resolution = log2(image_size)
-        assert is_power_of_two(resolution), 'image size must be a power of 2'
+        assert is_power_of_two(image_size), 'image size must be a power of 2'
         init_channel = 4 if transparent else 3
         fmap_max = default(fmap_max, latent_dim)
 
@@ -444,7 +444,7 @@ class Discriminator(nn.Module):
     ):
         super().__init__()
         resolution = log2(image_size)
-        assert is_power_of_two(resolution), 'image size must be a power of 2'
+        assert is_power_of_two(image_size), 'image size must be a power of 2'
         assert disc_output_size in {1, 5}, 'discriminator output dimensions can only be 5x5 or 1x1'
 
         resolution = int(resolution)
