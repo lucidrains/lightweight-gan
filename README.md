@@ -21,7 +21,7 @@ $ pip install lightweight-gan
 ## Usage
 
 ```bash
-$ lightweight_gan --data ./path/to/images --image-size 512 --aug-prob 0.2
+$ lightweight_gan --data ./path/to/images --image-size 512 --aug-prob 0.25
 ```
 
 Model will be saved to `./models/{name}` every 1000 iterations, and samples from the model saved to `./results/{name}`. `name` will be `default`, by default.
@@ -37,6 +37,16 @@ $ lightweight_gan \
     --batch-size 16 \
     --gradient-accumulate-every 4 \
     --num-train-steps 200000
+```
+
+## Augmentation
+
+Augmentation is essential for Lightweight GAN to work effectively in a low data setting
+
+By default, the augmentation types is set to translation and cutout, with color omitted. You can include color as well with the following.
+
+```bash
+$ lightweight_gan --data ./path/to/images --aug-prob 0.25 --aug-types [translation,cutout,color]
 ```
 
 ## Mixed precision
@@ -78,7 +88,7 @@ You can add linear + axial attention to specific resolution layers with the foll
 
 ```bash
 # make sure there are no spaces between the values within the brackets []
-$ lightweight_gan --data ./path/to/images --image-size 512 --attn-res-layers [32,64]
+$ lightweight_gan --data ./path/to/images --image-size 512 --attn-res-layers [32,64] --aug-prob 0.25
 ```
 ## Citations
 
