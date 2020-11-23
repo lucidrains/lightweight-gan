@@ -26,6 +26,43 @@ $ lightweight_gan --data ./path/to/images --image-size 512 --aug-prob 0.2
 
 Model will be saved to `./models/{name}` every 1000 iterations, and samples from the model saved to `./results/{name}`. `name` will be `default`, by default.
 
+## Training settings
+
+Pretty self explanatory for deep learning practitioners
+
+```bash
+$ lightweight_gan \
+    --data ./path/to/images \
+    --name {name of run} \
+    --batch-size 16 \
+    --gradient-accumulate-every 4 \
+    --num-train-steps 200000
+```
+
+## Mixed precision
+
+You can turn on automatic mixed precision with one flag `--amp`
+
+You should expect it to be 33% faster and save up to 40% memory
+
+## Multiple GPUs
+
+Also one flag to use `--multi-gpu`
+
+## Generating
+
+Once you have finished training, you can generate samples with one command. You can select which checkpoint number to load from. If `--load-from` is not specified, will default to the latest.
+
+```bash
+$ lightweight_gan --name {name of run} --load-from {checkpoint num} --generate
+```
+
+You can also generate interpolations
+
+```bash
+$ lightweight_gan --name {name of run} --generate-interpolation
+```
+
 ## Discriminator output size
 
 The author has kindly let me know that the discriminator output size (5x5 vs 1x1) leads to different results on different datasets. (5x5 works better for art than for faces, as an example). You can toggle this with a single flag
@@ -43,43 +80,6 @@ You can add linear + axial attention to specific resolution layers with the foll
 # make sure there are no spaces between the values within the brackets []
 $ lightweight_gan --data ./path/to/images --image-size 512 --attn-res-layers [32,64]
 ```
-
-## Mixed precision
-
-You can turn on automatic mixed precision with one flag `--amp`
-
-You should expect it to be 33% faster and save up to 40% memory
-
-## Multiple GPUs
-
-Also one flag to use `--multi-gpu`
-
-## Training settings
-
-```bash
-$ lightweight_gan \
-    --data ./path/to/images \
-    --name {name of run} \
-    --batch-size 16 \
-    --gradient-accumulate-every 4 \
-    --num-train-steps 200000
-```
-
-## Generating
-
-Once you have finished training, you can generate samples with one command. You can select which checkpoint number to load from. If `--load-from` is not specified, will default to the latest.
-
-
-```bash
-$ lightweight_gan --name {name of run} --load-from {checkpoint num} --generate
-```
-
-You can also generate interpolations
-
-```bash
-$ lightweight_gan --name {name of run} --generate-interpolation
-```
-
 ## Citations
 
 ```bibtex
