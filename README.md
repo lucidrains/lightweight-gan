@@ -50,6 +50,10 @@ You can turn on automatic mixed precision with one flag `--amp`
 
 You should expect it to be 33% faster and save up to 40% memory
 
+## Multiple GPUs
+
+Also one flag to use `--multi-gpu`
+
 ## Citations
 
 ```bibtex
