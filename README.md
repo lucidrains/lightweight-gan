@@ -127,3 +127,5 @@ $ lightweight_gan --data ./path/to/images --image-size 512 --attn-res-layers [32
     primaryClass={stat.ML}
 }
 ```
+
+*What I cannot create, I do not understand* - Richard Feynman
