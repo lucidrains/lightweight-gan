@@ -277,23 +277,26 @@ class SLE(nn.Module):
         return self.net(torch.cat((pooled_max, pooled_avg), dim = 1))
 
 class SpatialSLE(nn.Module):
-    def __init__(self, upsample_times):
+    def __init__(self, upsample_times, num_groups = 2):
         super().__init__()
+        self.num_groups = num_groups
+        chan = num_groups * 2
+
         self.net = nn.Sequential(
-            nn.Conv2d(4, 4, 3, padding = 1),
+            nn.Conv2d(chan, chan, 3, padding = 1),
             upsample(2 ** upsample_times),
-            nn.Conv2d(4, 4, 3, padding = 1),
+            nn.Conv2d(chan, chan, 3, padding = 1),
             nn.LeakyReLU(0.1),
-            nn.Conv2d(4, 1, 3, padding = 1),
+            nn.Conv2d(chan, 1, 3, padding = 1),
             nn.Sigmoid()
         )
     def forward(self, x):
         b, c, h, w = x.shape
-        num_groups = 2
+        num_groups = self.num_groups
         mult = math.ceil(c / num_groups)
         padding = (mult - c % mult) // 2
         x_padded = F.pad(x, (0, 0, 0, 0, padding, padding))
-        x = rearrange(x, 'b (g c) h w -> b g c h w', g = num_groups)
+        x = rearrange(x_padded, 'b (g c) h w -> b g c h w', g = num_groups)
 
         pooled_avg = x.mean(dim = 2)
         pooled_max, _ = x.max(dim = 2)
@@ -361,7 +364,10 @@ class Generator(nn.Module):
 
             sle_spatial = None
             if res <= (resolution - self.num_layers_spatial_res):
-                sle_spatial = SpatialSLE(upsample_times = self.num_layers_spatial_res)
+                sle_spatial = SpatialSLE(
+                    upsample_times = self.num_layers_spatial_res,
+                    num_groups = 2 if res < 8 else 1
+                )
 
             layer = nn.ModuleList([
                 nn.Sequential(
