@@ -10,6 +10,7 @@ from pathlib import Path
 from shutil import rmtree
 
 import torch
+from torch.cuda.amp import autocast, GradScaler
 from torch.optim import Adam
 from torch import nn, einsum
 import torch.nn.functional as F
@@ -89,15 +90,6 @@ def gradient_accumulate_contexts(gradient_accumulate_every, is_ddp, ddps):
     for context in contexts:
         with context():
             yield
-
-def gradient_penalty(images, outputs, weight = 10):
-    batch_size = images.shape[0]
-    gradients = torch_grad(outputs=outputs, inputs=images,
-                           grad_outputs=list(map(lambda t: torch.ones(t.size(), device = images.device), outputs)),
-                           create_graph=True, retain_graph=True, only_inputs=True)[0]
-
-    gradients = gradients.reshape(batch_size, -1)
-    return weight * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
 
 def hinge_loss(real, fake):
     return (F.relu(1 + real) + F.relu(1 - fake)).mean()
@@ -706,7 +698,7 @@ class Trainer():
         fmap_max = 512,
         transparent = False,
         batch_size = 4,
-        mixed_prob = 0.9,
+        gp_weight = 10,
         gradient_accumulate_every = 1,
         attn_res_layers = [],
         sle_spatial = False,
@@ -725,6 +717,7 @@ class Trainer():
         rank = 0,
         world_size = 1,
         log = False,
+        amp = False,
         *args,
         **kwargs
     ):
@@ -756,6 +749,8 @@ class Trainer():
         self.batch_size = batch_size
         self.gradient_accumulate_every = gradient_accumulate_every
 
+        self.gp_weight = gp_weight
+
         self.evaluate_every = evaluate_every
         self.save_every = save_every
         self.steps = 0
@@ -786,6 +781,13 @@ class Trainer():
         self.world_size = world_size
 
         self.syncbatchnorm = is_ddp
+
+        self.amp = amp
+        self.G_scaler = None
+        self.D_scaler = None
+        if self.amp:
+            self.G_scaler = GradScaler()
+            self.D_scaler = GradScaler()
 
     @property
     def image_extension(self):
@@ -896,45 +898,77 @@ class Trainer():
 
         apply_gradient_penalty = self.steps % 4 == 0
 
+        # amp related contexts and functions
+
+        amp_context = autocast if self.amp else null_context
+
+        def backward(amp, loss, scaler):
+            if amp:
+                return scaler.scale(loss).backward()
+            loss.backward()
+
+        def optimizer_step(amp, optimizer, scaler):
+            if amp:
+                scaler.step(optimizer)
+                scaler.update()
+                return
+            optimizer.step()
+
+        backward = partial(backward, self.amp)
+        optimizer_step = partial(optimizer_step, self.amp)
+
         # train discriminator
-
         self.GAN.D_opt.zero_grad()
-
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[D_aug, G]):
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
-
-            generated_images = G(latents)
-            fake_output, fake_output_32x32, _ = D_aug(generated_images.detach(), detach = True, **aug_kwargs)
-
             image_batch = next(self.loader).cuda(self.rank)
             image_batch.requires_grad_()
-            real_output, real_output_32x32, real_aux_loss = D_aug(image_batch,  calc_aux_loss = True, **aug_kwargs)
 
-            real_output_loss = real_output
-            fake_output_loss = fake_output
+            with amp_context():
+                generated_images = G(latents)
+                fake_output, fake_output_32x32, _ = D_aug(generated_images.detach(), detach = True, **aug_kwargs)
 
-            divergence = hinge_loss(real_output_loss, fake_output_loss)
-            divergence_32x32 = hinge_loss(real_output_32x32, fake_output_32x32)
-            disc_loss = divergence + divergence_32x32
+                real_output, real_output_32x32, real_aux_loss = D_aug(image_batch,  calc_aux_loss = True, **aug_kwargs)
 
-            aux_loss = real_aux_loss
-            disc_loss = disc_loss + aux_loss
+                real_output_loss = real_output
+                fake_output_loss = fake_output
+
+                divergence = hinge_loss(real_output_loss, fake_output_loss)
+                divergence_32x32 = hinge_loss(real_output_32x32, fake_output_32x32)
+                disc_loss = divergence + divergence_32x32
+
+                aux_loss = real_aux_loss
+                disc_loss = disc_loss + aux_loss
 
             if apply_gradient_penalty:
-                gp = gradient_penalty(image_batch, (real_output, real_output_32x32))
-                self.last_gp_loss = gp.clone().detach().item()
-                disc_loss = disc_loss + gp
+                outputs = [real_output, real_output_32x32]
+                outputs = list(map(self.D_scaler.scale, outputs)) if self.amp else outputs
 
-            disc_loss = disc_loss / self.gradient_accumulate_every
+                scaled_gradients = torch_grad(outputs=outputs, inputs=image_batch,
+                                       grad_outputs=list(map(lambda t: torch.ones(t.size(), device = image_batch.device), outputs)),
+                                       create_graph=True, retain_graph=True, only_inputs=True)[0]
+
+                inv_scale = (1. / self.D_scaler.get_scale()) if self.amp else 1.
+                gradients = scaled_gradients * inv_scale
+
+                with amp_context():
+                    gradients = gradients.reshape(batch_size, -1)
+                    gp =  self.gp_weight * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
+
+                    if not torch.isnan(gp):
+                        disc_loss = disc_loss + gp
+                        self.last_gp_loss = gp.clone().detach().item()
+
+            with amp_context():
+                disc_loss = disc_loss / self.gradient_accumulate_every
+
             disc_loss.register_hook(raise_if_nan)
-            disc_loss.backward()
-
+            backward(disc_loss, self.D_scaler)
             total_disc_loss += divergence
 
         self.last_recon_loss = aux_loss.item()
         self.d_loss = float(total_disc_loss.item() / self.gradient_accumulate_every)
-
-        self.GAN.D_opt.step()
+        optimizer_step(self.GAN.D_opt, self.D_scaler)
 
         # train generator
 
@@ -942,29 +976,29 @@ class Trainer():
 
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[G, D_aug]):
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
-            generated_images = G(latents)
-            fake_output, fake_output_32x32, _ = D_aug(generated_images, **aug_kwargs)
-            fake_output_loss = fake_output.mean(dim = 1) + fake_output_32x32.mean(dim = 1)
 
-            epochs = (self.steps * batch_size * self.gradient_accumulate_every) / len(self.dataset)
-            k_frac = max(self.generator_top_k_gamma ** epochs, self.generator_top_k_frac)
-            k = math.ceil(batch_size * k_frac)
+            with amp_context():
+                generated_images = G(latents)
+                fake_output, fake_output_32x32, _ = D_aug(generated_images, **aug_kwargs)
+                fake_output_loss = fake_output.mean(dim = 1) + fake_output_32x32.mean(dim = 1)
 
-            if k != batch_size:
-                fake_output_loss, _ = fake_output_loss.topk(k=k, largest=False)
+                epochs = (self.steps * batch_size * self.gradient_accumulate_every) / len(self.dataset)
+                k_frac = max(self.generator_top_k_gamma ** epochs, self.generator_top_k_frac)
+                k = math.ceil(batch_size * k_frac)
 
-            loss = fake_output_loss.mean()
-            gen_loss = loss
+                if k != batch_size:
+                    fake_output_loss, _ = fake_output_loss.topk(k=k, largest=False)
 
-            gen_loss = gen_loss / self.gradient_accumulate_every
+                loss = fake_output_loss.mean()
+                gen_loss = loss
+
+                gen_loss = gen_loss / self.gradient_accumulate_every
             gen_loss.register_hook(raise_if_nan)
-            gen_loss.backward()
-
+            backward(gen_loss, self.G_scaler)
             total_gen_loss += loss 
 
         self.g_loss = float(total_gen_loss.item() / self.gradient_accumulate_every)
-
-        self.GAN.G_opt.step()
+        optimizer_step(self.GAN.G_opt, self.G_scaler)
 
         # calculate moving averages
 
@@ -1138,6 +1172,13 @@ class Trainer():
             'version': __version__
         }
 
+        if self.amp:
+            save_data = {
+                **save_data,
+                'G_scaler': self.G_scaler.state_dict(),
+                'D_scaler': self.D_scaler.state_dict()
+            }
+
         torch.save(save_data, self.model_name(num))
         self.write_config()
 
@@ -1165,3 +1206,9 @@ class Trainer():
         except Exception as e:
             print('unable to load save model. please try downgrading the package to the version specified by the saved model')
             raise e
+
+        if self.amp:
+            if 'G_scaler' in load_data:
+                self.G_scaler.load_state_dict(load_data['G_scaler'])
+            if 'D_scaler' in load_data:
+                self.D_scaler.load_state_dict(load_data['D_scaler'])

@@ -44,6 +44,12 @@ You can add linear + axial attention to specific resolution layers with the foll
 $ lightweight_gan --data ./path/to/images --image-size 512 --attn-res-layers [32,64]
 ```
 
+## Mixed precision
+
+You can turn on automatic mixed precision with one flag `--amp`
+
+You should expect it to be 33% faster and save up to 40% memory
+
 ## Citations
 
 ```bibtex
