@@ -96,7 +96,8 @@ def train_from_folder(
     dataset_aug_prob = 0.,
     multi_gpus = False,
     calculate_fid_every = None,
-    seed = 42
+    seed = 42,
+    amp = False
 ):
     model_args = dict(
         name = name,
@@ -118,7 +119,8 @@ def train_from_folder(
         aug_prob = aug_prob,
         aug_types = cast_list(aug_types),
         dataset_aug_prob = dataset_aug_prob,
-        calculate_fid_every = calculate_fid_every
+        calculate_fid_every = calculate_fid_every,
+        amp = amp
     )
 
     if generate:
