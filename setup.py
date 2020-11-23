@@ -32,7 +32,7 @@ setup(
     'pillow',
     'pytorch-fid',
     'retry',
-    'torch',
+    'torch>=1.6',
     'torchvision',
     'tqdm'
   ],
