@@ -54,6 +54,32 @@ You should expect it to be 33% faster and save up to 40% memory
 
 Also one flag to use `--multi-gpu`
 
+## Training settings
+
+```bash
+$ lightweight_gan \
+    --data ./path/to/images \
+    --name {name of run} \
+    --batch-size 16 \
+    --gradient-accumulate-every 4 \
+    --num-train-steps 200000
+```
+
+## Generating
+
+Once you have finished training, you can generate samples with one command. You can select which checkpoint number to load from. If `--load-from` is not specified, will default to the latest.
+
+
+```bash
+$ lightweight_gan --name {name of run} --load-from {checkpoint num} --generate
+```
+
+You can also generate interpolations
+
+```bash
+$ lightweight_gan --name {name of run} --generate-interpolation
+```
+
 ## Citations
 
 ```bibtex
