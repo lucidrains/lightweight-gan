@@ -709,7 +709,7 @@ class Trainer():
         save_every = 1000,
         evaluate_every = 1000,
         trunc_psi = 0.6,
-        aug_prob = 0.,
+        aug_prob = None,
         aug_types = ['translation', 'cutout'],
         dataset_aug_prob = 0.,
         calculate_fid_every = None,
@@ -872,6 +872,12 @@ class Trainer():
         dataloader = DataLoader(self.dataset, num_workers = NUM_CORES, batch_size = math.ceil(self.batch_size / self.world_size), sampler = sampler, shuffle = not self.is_ddp, drop_last = True, pin_memory = True)
         self.loader = cycle(dataloader)
 
+        # auto set augmentation prob for user if dataset is detected to be low
+        num_samples = len(self.dataset)
+        if not exists(self.aug_prob) and num_samples < 1e5:
+            self.aug_prob = min(0.5, (1e5 - num_samples) * 3e-6)
+            print(f'autosetting augmentation probability to {round(self.aug_prob * 100)}%')
+
     def train(self):
         assert exists(self.loader), 'You must first initialize the data source with `.set_data_src(<folder of images>)`'
         device = torch.device(f'cuda:{self.rank}')
@@ -888,7 +894,7 @@ class Trainer():
         image_size = self.GAN.image_size
         latent_dim = self.GAN.latent_dim
 
-        aug_prob   = self.aug_prob
+        aug_prob   = default(self.aug_prob, 0)
         aug_types  = self.aug_types
         aug_kwargs = {'prob': aug_prob, 'types': aug_types}
 

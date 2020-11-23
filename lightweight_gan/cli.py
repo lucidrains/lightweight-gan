@@ -91,7 +91,7 @@ def train_from_folder(
     save_frames = False,
     num_image_tiles = 8,
     trunc_psi = 0.75,
-    aug_prob = 0.,
+    aug_prob = None,
     aug_types = ['cutout', 'translation'],
     dataset_aug_prob = 0.,
     multi_gpus = False,
