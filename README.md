@@ -90,6 +90,11 @@ You can add linear + axial attention to specific resolution layers with the foll
 # make sure there are no spaces between the values within the brackets []
 $ lightweight_gan --data ./path/to/images --image-size 512 --attn-res-layers [32,64] --aug-prob 0.25
 ```
+
+## Alternatives
+
+If you want the current state of the art GAN, you can find it at https://github.com/lucidrains/stylegan2-pytorch
+
 ## Citations
 
 ```bibtex
