@@ -22,6 +22,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from PIL import Image
 import torchvision
 from torchvision import transforms
+from kornia import filter2D
 
 from lightweight_gan.diff_augment import DiffAugment
 from lightweight_gan.version import __version__
@@ -156,6 +157,16 @@ class SumBranches(nn.Module):
         self.branches = nn.ModuleList(branches)
     def forward(self, x):
         return sum(map(lambda fn: fn(x), self.branches))
+
+class Blur(nn.Module):
+    def __init__(self):
+        super().__init__()
+        f = torch.Tensor([1, 2, 1])
+        self.register_buffer('f', f)
+    def forward(self, x):
+        f = self.f
+        f = f[None, None, :] * f [None, :, None]
+        return filter2D(x, f, normalized=True)
 
 # dataset
 
@@ -372,6 +383,7 @@ class Generator(nn.Module):
             layer = nn.ModuleList([
                 nn.Sequential(
                     upsample(),
+                    Blur(),
                     nn.Conv2d(chan_in, chan_out * 2, 3, padding = 1),
                     norm_class(chan_out * 2),
                     nn.GLU(dim = 1)
@@ -485,6 +497,7 @@ class Discriminator(nn.Module):
             chan_out = features[0][-1] if last_layer else init_channel
 
             self.non_residual_layers.append(nn.Sequential(
+                Blur(),
                 nn.Conv2d(init_channel, chan_out, 4, stride = 2, padding = 1),
                 nn.LeakyReLU(0.1)
             ))
@@ -501,12 +514,14 @@ class Discriminator(nn.Module):
             self.residual_layers.append(nn.ModuleList([
                 SumBranches([
                     nn.Sequential(
+                        Blur(),
                         nn.Conv2d(chan_in, chan_out, 4, stride = 2, padding = 1),
                         nn.LeakyReLU(0.1),
                         nn.Conv2d(chan_out, chan_out, 3, padding = 1),
                         nn.LeakyReLU(0.1)
                     ),
                     nn.Sequential(
+                        Blur(),
                         nn.AvgPool2d(2),
                         nn.Conv2d(chan_in, chan_out, 1),
                         nn.LeakyReLU(0.1),
@@ -524,6 +539,7 @@ class Discriminator(nn.Module):
             )
         elif disc_output_size == 1:
             self.to_logits = nn.Sequential(
+                Blur(),
                 nn.Conv2d(last_chan, last_chan, 3, stride = 2, padding = 1),
                 nn.LeakyReLU(0.1),
                 nn.Conv2d(last_chan, 1, 4)
@@ -534,12 +550,14 @@ class Discriminator(nn.Module):
             Residual(Rezero(GSA(dim = 64, norm_queries = True, batch_norm = False))),
             SumBranches([
                 nn.Sequential(
+                    Blur(),
                     nn.Conv2d(64, 32, 4, stride = 2, padding = 1),
                     nn.LeakyReLU(0.1),
                     nn.Conv2d(32, 32, 3, padding = 1),
                     nn.LeakyReLU(0.1)
                 ),
                 nn.Sequential(
+                    Blur(),
                     nn.AvgPool2d(2),
                     nn.Conv2d(64, 32, 1),
                     nn.LeakyReLU(0.1),
@@ -709,6 +727,7 @@ class Trainer():
         attn_res_layers = [],
         sle_spatial = False,
         disc_output_size = 5,
+        antialias = False,
         lr = 2e-4,
         lr_mlp = 1.,
         ttur_mult = 1.,
@@ -767,6 +786,7 @@ class Trainer():
         self.attn_res_layers = attn_res_layers
         self.sle_spatial = sle_spatial
         self.disc_output_size = disc_output_size
+        self.antialias = antialias
 
         self.d_loss = 0
         self.g_loss = 0
@@ -809,7 +829,10 @@ class Trainer():
         # set some global variables before instantiating GAN
 
         global norm_class
+        global Blur
+
         norm_class = nn.SyncBatchNorm if self.syncbatchnorm else nn.BatchNorm2d
+        Blur = nn.Identity if not self.antialias else Blur
 
         # handle bugs when
         # switching from multi-gpu back to single gpu
