@@ -34,6 +34,8 @@ from pytorch_fid import fid_score
 from adabelief_pytorch import AdaBelief
 from gsa_pytorch import GSA
 
+from scipy.stats import truncnorm
+
 # asserts
 
 assert torch.cuda.is_available(), 'You need to have an Nvidia GPU with CUDA installed.'
@@ -109,6 +111,10 @@ def slerp(val, low, high):
     so = torch.sin(omega)
     res = (torch.sin((1.0 - val) * omega) / so).unsqueeze(1) * low + (torch.sin(val * omega) / so).unsqueeze(1) * high
     return res
+
+def truncated_normal(size, threshold = 1.5):
+    values = truncnorm.rvs(-threshold, threshold, size = size)
+    return torch.from_numpy(values)
 
 # helper classes
 
@@ -1084,7 +1090,7 @@ class Trainer():
 
         # latents and noise
 
-        latents = torch.randn(num_rows ** 2, latent_dim).cuda(self.rank)
+        latents = truncated_normal((num_rows ** 2, latent_dim)).float().cuda(self.rank)
 
         # regular
 
