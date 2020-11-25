@@ -57,7 +57,7 @@ You should expect it to be 33% faster and save up to 40% memory
 
 ## Multiple GPUs
 
-Also one flag to use `--multi-gpu`
+Also one flag to use `--multi-gpus`
 
 ## Generating
 
