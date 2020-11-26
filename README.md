@@ -18,10 +18,12 @@ Implementation of <a href="https://openreview.net/forum?id=1Fqg133qRaI">'lightwe
 $ pip install lightweight-gan
 ```
 
-## Usage
+## Use
+
+One command
 
 ```bash
-$ lightweight_gan --data ./path/to/images --image-size 512 --aug-prob 0.25
+$ lightweight_gan --data ./path/to/images --image-size 512
 ```
 
 Model will be saved to `./models/{name}` every 1000 iterations, and samples from the model saved to `./results/{name}`. `name` will be `default`, by default.
