@@ -1090,7 +1090,7 @@ class Trainer():
 
         # latents and noise
 
-        latents = truncated_normal((num_rows ** 2, latent_dim)).float().cuda(self.rank)
+        latents = torch.randn((num_rows ** 2, latent_dim)).cuda(self.rank)
 
         # regular
 
