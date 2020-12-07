@@ -405,7 +405,7 @@ class Generator(nn.Module):
     def forward(self, x):
         x = rearrange(x, 'b c -> b c () ()')
         x = self.initial_conv(x)
-        x = F.normalize(x, dim = -1)
+        x = F.normalize(x, dim = 1)
 
         residuals = dict()
         spatial_residuals = dict()
