@@ -6,6 +6,10 @@
 
 *256x256 flowers after 12 hours of training, 1 gpu*
 
+<img src="./pizza-512.jpg" width="600px"></img>
+
+*Pizza*
+
 ## 'Lightweight' GAN
 
 [![PyPI version](https://badge.fury.io/py/lightweight-gan.svg)](https://badge.fury.io/py/lightweight-gan)
