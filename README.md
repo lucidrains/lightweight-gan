@@ -98,6 +98,46 @@ result wil be something like that:
 
 ![](./docs/aug_test/lena_augs.jpg)
 
+### Types of augmentations
+
+This library contains several types of embedded augmentations.  
+Some of these works by default, some of these can be controlled from  a command as options in the `--aug-types`:
+- Horizontal flip (work by default, not under control, runs in the AugWrapper class);
+- `color` randomly change brightness, saturation and contrast;
+- `cutout` creates random black boxes on the image; 
+- `offset` randomly moves image by x and y-axis with repeating image;
+  - `offset_x` only by an x-axis;
+  - `offset_y` only by a y-axis;
+- `translation` randomly moves image on the canvas with black background;
+
+Full setup of augmentations is `--aug-types [color,cutout,offset,translation]`.  
+Full setup of augmentations is `--aug-types [color,cutout,offset,translation]`.  
+General recommendation is using suitable augs for your data and as many as possible, then after sometime of training disable most destructive (for image) augs.
+
+#### Color
+
+![](./docs/aug_types/lena_augs_color.jpg)
+
+#### Cutout
+
+![](./docs/aug_types/lena_augs_cutout.jpg)
+
+#### Offset
+
+![](./docs/aug_types/lena_augs_offset.jpg)
+
+Only x-axis:
+
+![](./docs/aug_types/lena_augs_offset_h.jpg)
+
+Only y-axis:
+
+![](./docs/aug_types/lena_augs_offset_v.jpg)
+
+#### Translation
+
+![](./docs/aug_types/lena_augs_translation.jpg)
+
 ## Mixed precision
 
 You can turn on automatic mixed precision with one flag `--amp`
