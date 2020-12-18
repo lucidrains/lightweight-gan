@@ -6,6 +6,7 @@ from tqdm import tqdm
 from datetime import datetime
 from functools import wraps
 from lightweight_gan import Trainer, NanException
+from lightweight_gan.diff_augment_test import DiffAugmentTest
 
 import torch
 import torch.multiprocessing as mp
@@ -84,6 +85,7 @@ def train_from_folder(
     evaluate_every = 1000,
     generate = False,
     generate_interpolation = False,
+    aug_test = False,
     attn_res_layers = [32],
     sle_spatial = False,
     disc_output_size = 1,
@@ -139,6 +141,10 @@ def train_from_folder(
         samples_name = timestamped_filename()
         model.generate_interpolation(samples_name, num_image_tiles, num_steps = interpolation_num_steps, save_frames = save_frames)
         print(f'interpolation generated at {results_dir}/{name}/{samples_name}')
+        return
+
+    if aug_test:
+        DiffAugmentTest(data=data, image_size=image_size, batch_size=batch_size, types=aug_types, nrow=num_image_tiles)
         return
 
     world_size = torch.cuda.device_count()
