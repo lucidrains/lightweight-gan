@@ -55,6 +55,49 @@ By default, the augmentation types is set to translation and cutout, with color 
 $ lightweight_gan --data ./path/to/images --aug-prob 0.25 --aug-types [translation,cutout,color]
 ```
 
+### Test augmentation
+
+You can test and see how your images will be augmented before it pass into a neural network (if you use augmentation). Let's see how it works on this image:
+
+![](./docs/aug_test/lena.jpg)
+
+#### Basic usage
+
+Base code to augment your image, define `--aug-test` and put path to your image into `--data`:
+
+```bash
+lightweight_gan \
+    --aug-test \
+    --data ./path/to/lena.jpg
+```
+
+After this will be created the file lena_augs.jpg that will be look something like this:
+
+![](./docs/aug_test/lena_augs_default.jpg)
+
+
+#### Options
+
+You can use some options to change result:
+- `--image-size 256` to change size of image tiles in the result. Default: `256`.
+- `--aug-type [color,cutout,translation]` to combine several augmentations. Default: `[cutout,translation]`.
+- `--batch-size 10` to change count of images in the result image. Default: `10`.
+- `--num-image-tiles 5` to change count of tiles in the result image. Default: `5`.
+
+Try this command:
+```bash
+lightweight_gan \
+    --aug-test \
+    --data ./path/to/lena.jpg \
+    --batch-size 16 \
+    --num-image-tiles 4 \
+    --aug-types [color,translation]
+```
+
+result wil be something like that:
+
+![](./docs/aug_test/lena_augs.jpg)
+
 ## Mixed precision
 
 You can turn on automatic mixed precision with one flag `--amp`
