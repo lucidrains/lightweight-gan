@@ -181,6 +181,10 @@ def convert_image_to(img_type, image):
         return image.convert(img_type)
     return image
 
+class identity(object):
+    def __call__(self, tensor):
+        return tensor
+
 class expand_greyscale(object):
     def __init__(self, transparent):
         self.transparent = transparent
@@ -212,15 +216,34 @@ def resize_to_minimum_size(min_size, image):
     return image
 
 class ImageDataset(Dataset):
-    def __init__(self, folder, image_size, transparent = False, aug_prob = 0.):
+    def __init__(
+        self,
+        folder,
+        image_size,
+        transparent = False,
+        greyscale = False,
+        aug_prob = 0.
+    ):
         super().__init__()
         self.folder = folder
         self.image_size = image_size
         self.paths = [p for ext in EXTS for p in Path(f'{folder}').glob(f'**/*.{ext}')]
         assert len(self.paths) > 0, f'No images were found in {folder} for training'
 
-        convert_image_fn = partial(convert_image_to, 'RGBA' if transparent else 'RGB')
-        num_channels = 3 if not transparent else 4
+        if transparent:
+            num_channels = 4
+            pillow_mode = 'RGBA'
+            expand_fn = expand_greyscale(transparent)
+        elif greyscale:
+            num_channels = 1
+            pillow_mode = 'L'
+            expand_fn = identity()
+        else:
+            num_channels = 3
+            pillow_mode = 'RGB'
+            expand_fn = expand_greyscale(transparent)
+
+        convert_image_fn = partial(convert_image_to, pillow_mode)
 
         self.transform = transforms.Compose([
             transforms.Lambda(convert_image_fn),
@@ -228,7 +251,7 @@ class ImageDataset(Dataset):
             transforms.Resize(image_size),
             RandomApply(aug_prob, transforms.RandomResizedCrop(image_size, scale=(0.5, 1.0), ratio=(0.98, 1.02)), transforms.CenterCrop(image_size)),
             transforms.ToTensor(),
-            transforms.Lambda(expand_greyscale(transparent))
+            transforms.Lambda(expand_fn)
         ])
 
     def __len__(self):
@@ -252,12 +275,12 @@ class AugWrapper(nn.Module):
         self.D = D
 
     def forward(self, images, prob = 0., types = [], detach = False, **kwargs):
-        if random() < prob:
-            images = random_hflip(images, prob=0.5)
-            images = DiffAugment(images, types=types)
+        context = torch.no_grad if detach else null_context
 
-        if detach:
-            images = images.detach()
+        with context():
+            if random() < prob:
+                images = random_hflip(images, prob=0.5)
+                images = DiffAugment(images, types=types)
 
         return self.D(images, **kwargs)
 
@@ -329,13 +352,21 @@ class Generator(nn.Module):
         fmap_max = 512,
         fmap_inverse_coef = 12,
         transparent = False,
+        greyscale = False,
         attn_res_layers = [],
         sle_spatial = False
     ):
         super().__init__()
         resolution = log2(image_size)
         assert is_power_of_two(image_size), 'image size must be a power of 2'
-        init_channel = 4 if transparent else 3
+
+        if transparent:
+            init_channel = 4
+        elif greyscale:
+            init_channel = 1
+        else:
+            init_channel = 3
+
         fmap_max = default(fmap_max, latent_dim)
 
         self.initial_conv = nn.Sequential(
@@ -472,6 +503,7 @@ class Discriminator(nn.Module):
         fmap_max = 512,
         fmap_inverse_coef = 12,
         transparent = False,
+        greyscale = False,
         disc_output_size = 5,
         attn_res_layers = []
     ):
@@ -481,7 +513,13 @@ class Discriminator(nn.Module):
         assert disc_output_size in {1, 5}, 'discriminator output dimensions can only be 5x5 or 1x1'
 
         resolution = int(resolution)
-        init_channel = 4 if transparent else 3
+
+        if transparent:
+            init_channel = 4
+        elif greyscale:
+            init_channel = 1
+        else:
+            init_channel = 3
 
         num_non_residual_layers = max(0, int(resolution) - 8)
         num_residual_layers = 8 - 3
@@ -638,6 +676,7 @@ class LightweightGAN(nn.Module):
         fmap_max = 512,
         fmap_inverse_coef = 12,
         transparent = False,
+        greyscale = False,
         disc_output_size = 5,
         attn_res_layers = [],
         sle_spatial = False,
@@ -656,6 +695,7 @@ class LightweightGAN(nn.Module):
             fmap_max = fmap_max,
             fmap_inverse_coef = fmap_inverse_coef,
             transparent = transparent,
+            greyscale = greyscale,
             attn_res_layers = attn_res_layers,
             sle_spatial = sle_spatial
         )
@@ -667,6 +707,7 @@ class LightweightGAN(nn.Module):
             fmap_max = fmap_max,
             fmap_inverse_coef = fmap_inverse_coef,
             transparent = transparent,
+            greyscale = greyscale,
             attn_res_layers = attn_res_layers,
             disc_output_size = disc_output_size
         )
@@ -727,6 +768,7 @@ class Trainer():
         image_size = 128,
         fmap_max = 512,
         transparent = False,
+        greyscale = False,
         batch_size = 4,
         gp_weight = 10,
         gradient_accumulate_every = 1,
@@ -771,6 +813,9 @@ class Trainer():
         self.image_size = image_size
         self.fmap_max = fmap_max
         self.transparent = transparent
+        self.greyscale = greyscale
+
+        assert (int(self.transparent) + int(self.greyscale)) < 2, 'you can only set either transparency or greyscale'
 
         self.aug_prob = aug_prob
         self.aug_types = aug_types
@@ -862,6 +907,7 @@ class Trainer():
             fmap_max = self.fmap_max,
             disc_output_size = self.disc_output_size,
             transparent = self.transparent,
+            greyscale = self.greyscale,
             rank = self.rank,
             *args,
             **kwargs
@@ -881,6 +927,7 @@ class Trainer():
         config = self.config() if not self.config_path.exists() else json.loads(self.config_path.read_text())
         self.image_size = config['image_size']
         self.transparent = config['transparent']
+        self.greyscale = config['greyscale']
         self.syncbatchnorm = config['syncbatchnorm']
         self.disc_output_size = config['disc_output_size']
         self.attn_res_layers = config.pop('attn_res_layers', [])
@@ -894,6 +941,7 @@ class Trainer():
         return {
             'image_size': self.image_size,
             'transparent': self.transparent,
+            'greyscale': self.greyscale,
             'syncbatchnorm': self.syncbatchnorm,
             'disc_output_size': self.disc_output_size,
             'optimizer': self.optimizer,
@@ -902,7 +950,7 @@ class Trainer():
         }
 
     def set_data_src(self, folder):
-        self.dataset = ImageDataset(folder, self.image_size, transparent = self.transparent, aug_prob = self.dataset_aug_prob)
+        self.dataset = ImageDataset(folder, self.image_size, transparent = self.transparent, greyscale = self.greyscale, aug_prob = self.dataset_aug_prob)
         sampler = DistributedSampler(self.dataset, rank=self.rank, num_replicas=self.world_size, shuffle=True) if self.is_ddp else None
         dataloader = DataLoader(self.dataset, num_workers = math.ceil(NUM_CORES / self.world_size), batch_size = math.ceil(self.batch_size / self.world_size), sampler = sampler, shuffle = not self.is_ddp, drop_last = True, pin_memory = True)
         self.loader = cycle(dataloader)
@@ -966,8 +1014,10 @@ class Trainer():
             image_batch.requires_grad_()
 
             with amp_context():
-                generated_images = G(latents)
-                fake_output, fake_output_32x32, _ = D_aug(generated_images.detach(), detach = True, **aug_kwargs)
+                with torch.no_grad():
+                    generated_images = G(latents)
+
+                fake_output, fake_output_32x32, _ = D_aug(generated_images, detach = True, **aug_kwargs)
 
                 real_output, real_output_32x32, real_aux_loss = D_aug(image_batch,  calc_aux_loss = True, **aug_kwargs)
 
