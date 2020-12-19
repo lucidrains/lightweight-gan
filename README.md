@@ -111,7 +111,6 @@ Some of these works by default, some of these can be controlled from  a command 
 - `translation` randomly moves image on the canvas with black background;
 
 Full setup of augmentations is `--aug-types [color,cutout,offset,translation]`.  
-Full setup of augmentations is `--aug-types [color,cutout,offset,translation]`.  
 General recommendation is using suitable augs for your data and as many as possible, then after sometime of training disable most destructive (for image) augs.
 
 #### Color
