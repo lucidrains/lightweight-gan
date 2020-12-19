@@ -354,7 +354,7 @@ class Generator(nn.Module):
         transparent = False,
         greyscale = False,
         attn_res_layers = [],
-        sle_spatial = False
+        use_sle_spatial = False
     ):
         super().__init__()
         resolution = log2(image_size)
@@ -411,7 +411,7 @@ class Generator(nn.Module):
                 )
 
             sle_spatial = None
-            if res <= (resolution - self.num_layers_spatial_res):
+            if use_sle_spatial and res <= (resolution - self.num_layers_spatial_res):
                 sle_spatial = SpatialSLE(
                     upsample_times = self.num_layers_spatial_res,
                     num_groups = 2 if res < 8 else 1
@@ -697,7 +697,7 @@ class LightweightGAN(nn.Module):
             transparent = transparent,
             greyscale = greyscale,
             attn_res_layers = attn_res_layers,
-            sle_spatial = sle_spatial
+            use_sle_spatial = sle_spatial
         )
 
         self.G = Generator(**G_kwargs)
@@ -860,11 +860,8 @@ class Trainer():
         self.syncbatchnorm = is_ddp
 
         self.amp = amp
-        self.G_scaler = None
-        self.D_scaler = None
-        if self.amp:
-            self.G_scaler = GradScaler()
-            self.D_scaler = GradScaler()
+        self.G_scaler = GradScaler(enabled = self.amp)
+        self.D_scaler = GradScaler(enabled = self.amp)
 
     @property
     def image_extension(self):
@@ -927,9 +924,9 @@ class Trainer():
         config = self.config() if not self.config_path.exists() else json.loads(self.config_path.read_text())
         self.image_size = config['image_size']
         self.transparent = config['transparent']
-        self.greyscale = config['greyscale']
         self.syncbatchnorm = config['syncbatchnorm']
         self.disc_output_size = config['disc_output_size']
+        self.greyscale = config.pop('greyscale', False)
         self.attn_res_layers = config.pop('attn_res_layers', [])
         self.sle_spatial = config.pop('sle_spatial', False)
         self.optimizer = config.pop('optimizer', 'adam')
@@ -991,21 +988,6 @@ class Trainer():
 
         amp_context = autocast if self.amp else null_context
 
-        def backward(amp, loss, scaler):
-            if amp:
-                return scaler.scale(loss).backward()
-            loss.backward()
-
-        def optimizer_step(amp, optimizer, scaler):
-            if amp:
-                scaler.step(optimizer)
-                scaler.update()
-                return
-            optimizer.step()
-
-        backward = partial(backward, self.amp)
-        optimizer_step = partial(optimizer_step, self.amp)
-
         # train discriminator
         self.GAN.D_opt.zero_grad()
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[D_aug, G]):
@@ -1054,12 +1036,13 @@ class Trainer():
                 disc_loss = disc_loss / self.gradient_accumulate_every
 
             disc_loss.register_hook(raise_if_nan)
-            backward(disc_loss, self.D_scaler)
+            self.D_scaler.scale(disc_loss).backward()
             total_disc_loss += divergence
 
         self.last_recon_loss = aux_loss.item()
         self.d_loss = float(total_disc_loss.item() / self.gradient_accumulate_every)
-        optimizer_step(self.GAN.D_opt, self.D_scaler)
+        self.D_scaler.step(self.GAN.D_opt)
+        self.D_scaler.update()
 
         # train generator
 
@@ -1084,12 +1067,14 @@ class Trainer():
                 gen_loss = loss
 
                 gen_loss = gen_loss / self.gradient_accumulate_every
+
             gen_loss.register_hook(raise_if_nan)
-            backward(gen_loss, self.G_scaler)
+            self.G_scaler.scale(gen_loss).backward()
             total_gen_loss += loss 
 
         self.g_loss = float(total_gen_loss.item() / self.gradient_accumulate_every)
-        optimizer_step(self.GAN.G_opt, self.G_scaler)
+        self.G_scaler.step(self.GAN.G_opt)
+        self.G_scaler.update()
 
         # calculate moving averages
 
@@ -1260,15 +1245,10 @@ class Trainer():
     def save(self, num):
         save_data = {
             'GAN': self.GAN.state_dict(),
-            'version': __version__
+            'version': __version__,
+            'G_scaler': self.G_scaler.state_dict(),
+            'D_scaler': self.D_scaler.state_dict()
         }
-
-        if self.amp:
-            save_data = {
-                **save_data,
-                'G_scaler': self.G_scaler.state_dict(),
-                'D_scaler': self.D_scaler.state_dict()
-            }
 
         torch.save(save_data, self.model_name(num))
         self.write_config()
@@ -1298,8 +1278,7 @@ class Trainer():
             print('unable to load save model. please try downgrading the package to the version specified by the saved model')
             raise e
 
-        if self.amp:
-            if 'G_scaler' in load_data:
-                self.G_scaler.load_state_dict(load_data['G_scaler'])
-            if 'D_scaler' in load_data:
-                self.D_scaler.load_state_dict(load_data['D_scaler'])
+        if 'G_scaler' in load_data:
+            self.G_scaler.load_state_dict(load_data['G_scaler'])
+        if 'D_scaler' in load_data:
+            self.D_scaler.load_state_dict(load_data['D_scaler'])
