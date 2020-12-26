@@ -52,7 +52,8 @@ def rand_translation(x, ratio=0.125):
 def rand_offset(x, ratio=1, ratio_h=1, ratio_v=1):
     w, h = x.size(2), x.size(3)
 
-    for image_index in range(x.size(0)):
+    imgs = []
+    for img in x.unbind(dim = 0):
         max_h = int(w * ratio * ratio_h)
         max_v = int(h * ratio * ratio_v)
 
@@ -60,12 +61,14 @@ def rand_offset(x, ratio=1, ratio_h=1, ratio_v=1):
         value_v = random.randint(0, max_v) * 2 - max_v
 
         if abs(value_h) > 0:
-            x[image_index] = torch.roll(x[image_index], value_h, 2)
+            img = torch.roll(img, value_h, 2)
 
         if abs(value_v) > 0:
-            x[image_index] = torch.roll(x[image_index], value_v, 1)
+            img = torch.roll(img, value_v, 1)
 
-    return x
+        imgs.append(img)
+
+    return torch.stack(imgs)
 
 def rand_offset_h(x, ratio=1):
     return rand_offset(x, ratio=1, ratio_h=ratio, ratio_v=0)
