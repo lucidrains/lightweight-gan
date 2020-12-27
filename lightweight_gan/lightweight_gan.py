@@ -29,7 +29,6 @@ from lightweight_gan.version import __version__
 
 from tqdm import tqdm
 from einops import rearrange
-from pytorch_fid import fid_score
 
 from adabelief_pytorch import AdaBelief
 from gsa_pytorch import GSA
@@ -1139,6 +1138,7 @@ class Trainer():
 
     @torch.no_grad()
     def calculate_fid(self, num_batches):
+        from pytorch_fid import fid_score
         torch.cuda.empty_cache()
 
         real_path = str(self.results_dir / self.name / 'fid_real') + '/'

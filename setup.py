@@ -31,7 +31,6 @@ setup(
     'kornia',
     'numpy',
     'pillow',
-    'pytorch-fid',
     'retry',
     'scipy',
     'torch>=1.6',
