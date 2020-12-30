@@ -224,15 +224,16 @@ If you want the current state of the art GAN, you can find it at https://github.
 ```
 
 ```bibtex
-@misc{woo2018cbam,
-    title={CBAM: Convolutional Block Attention Module}, 
-    author={Sanghyun Woo and Jongchan Park and Joon-Young Lee and In So Kweon},
-    year={2018},
-    eprint={1807.06521},
+@misc{cao2020global,
+    title={Global Context Networks},
+    author={Yue Cao and Jiarui Xu and Stephen Lin and Fangyun Wei and Han Hu},
+    year={2020},
+    eprint={2012.13375},
     archivePrefix={arXiv},
     primaryClass={cs.CV}
 }
 ```
+
 
 ```bibtex
 @misc{sinha2020topk,

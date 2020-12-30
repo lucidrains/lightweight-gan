@@ -292,7 +292,7 @@ def upsample(scale_factor = 2):
 
 # classes
 
-class SLE(nn.Module):
+class GlobalContext(nn.Module):
     def __init__(
         self,
         *,
@@ -300,47 +300,21 @@ class SLE(nn.Module):
         chan_out
     ):
         super().__init__()
-        self.avg_pool = nn.AdaptiveAvgPool2d((4, 4))
-        self.max_pool = nn.AdaptiveMaxPool2d((4, 4))
+        self.to_k = nn.Conv2d(chan_in, 1, 1)
+        chan_intermediate = max(3, chan_out // 2)
 
-        chan_intermediate = chan_in // 2
         self.net = nn.Sequential(
-            nn.Conv2d(chan_in * 2, chan_intermediate, 4),
+            nn.Conv2d(chan_in, chan_intermediate, 1),
+            nn.LayerNorm((chan_intermediate, 1, 1)),
             nn.LeakyReLU(0.1),
             nn.Conv2d(chan_intermediate, chan_out, 1),
-            nn.Sigmoid()
         )
     def forward(self, x):
-        pooled_avg = self.avg_pool(x)
-        pooled_max = self.max_pool(x)
-        return self.net(torch.cat((pooled_max, pooled_avg), dim = 1))
-
-class SpatialSLE(nn.Module):
-    def __init__(self, upsample_times, num_groups = 2):
-        super().__init__()
-        self.num_groups = num_groups
-        chan = num_groups * 2
-
-        self.net = nn.Sequential(
-            nn.Conv2d(chan, chan, 3, padding = 1),
-            upsample(2 ** upsample_times),
-            nn.Conv2d(chan, chan, 3, padding = 1),
-            nn.LeakyReLU(0.1),
-            nn.Conv2d(chan, 1, 3, padding = 1),
-            nn.Sigmoid()
-        )
-    def forward(self, x):
-        b, c, h, w = x.shape
-        num_groups = self.num_groups
-        mult = math.ceil(c / num_groups)
-        padding = (mult - c % mult) // 2
-        x_padded = F.pad(x, (0, 0, 0, 0, padding, padding))
-        x = rearrange(x_padded, 'b (g c) h w -> b g c h w', g = num_groups)
-
-        pooled_avg = x.mean(dim = 2)
-        pooled_max, _ = x.max(dim = 2)
-        pooled = torch.cat((pooled_avg, pooled_max), dim = 1)
-        return self.net(pooled)
+        context = self.to_k(x)
+        context = context.flatten(2).softmax(dim = -1)
+        out = einsum('b i n, b c n -> b c i', context, x.flatten(2))
+        out = out.unsqueeze(-1)
+        return self.net(out)
 
 class Generator(nn.Module):
     def __init__(
@@ -352,8 +326,7 @@ class Generator(nn.Module):
         fmap_inverse_coef = 12,
         transparent = False,
         greyscale = False,
-        attn_res_layers = [],
-        use_sle_spatial = False
+        attn_res_layers = []
     ):
         super().__init__()
         resolution = log2(image_size)
@@ -404,16 +377,9 @@ class Generator(nn.Module):
                 residual_layer = self.sle_map[res]
                 sle_chan_out = self.res_to_feature_map[residual_layer - 1][-1]
 
-                sle = SLE(
+                sle = GlobalContext(
                     chan_in = chan_out,
                     chan_out = sle_chan_out
-                )
-
-            sle_spatial = None
-            if use_sle_spatial and res <= (resolution - self.num_layers_spatial_res):
-                sle_spatial = SpatialSLE(
-                    upsample_times = self.num_layers_spatial_res,
-                    num_groups = 2 if res < 8 else 1
                 )
 
             layer = nn.ModuleList([
@@ -425,7 +391,6 @@ class Generator(nn.Module):
                     nn.GLU(dim = 1)
                 ),
                 sle,
-                sle_spatial,
                 attn
             ])
             self.layers.append(layer)
@@ -438,13 +403,8 @@ class Generator(nn.Module):
         x = F.normalize(x, dim = 1)
 
         residuals = dict()
-        spatial_residuals = dict()
 
-        for (res, (up, sle, sle_spatial, attn)) in zip(self.res_layers, self.layers):
-            if exists(sle_spatial):
-                spatial_res = sle_spatial(x)
-                spatial_residuals[res + self.num_layers_spatial_res] = spatial_res
-
+        for (res, (up, sle, attn)) in zip(self.res_layers, self.layers):
             if exists(attn):
                 x = attn(x) + x
 
@@ -457,10 +417,7 @@ class Generator(nn.Module):
 
             next_res = res + 1
             if next_res in residuals:
-                x = x * residuals[next_res]
-
-            if next_res in spatial_residuals:
-                x = x * spatial_residuals[next_res]
+                x = x + residuals[next_res]
 
         return self.out_conv(x)
 
@@ -678,7 +635,6 @@ class LightweightGAN(nn.Module):
         greyscale = False,
         disc_output_size = 5,
         attn_res_layers = [],
-        sle_spatial = False,
         ttur_mult = 1.,
         lr = 2e-4,
         rank = 0,
@@ -695,8 +651,7 @@ class LightweightGAN(nn.Module):
             fmap_inverse_coef = fmap_inverse_coef,
             transparent = transparent,
             greyscale = greyscale,
-            attn_res_layers = attn_res_layers,
-            use_sle_spatial = sle_spatial
+            attn_res_layers = attn_res_layers
         )
 
         self.G = Generator(**G_kwargs)
@@ -772,7 +727,6 @@ class Trainer():
         gp_weight = 10,
         gradient_accumulate_every = 1,
         attn_res_layers = [],
-        sle_spatial = False,
         disc_output_size = 5,
         antialias = False,
         lr = 2e-4,
@@ -834,7 +788,6 @@ class Trainer():
         self.generator_top_k_frac = 0.5
 
         self.attn_res_layers = attn_res_layers
-        self.sle_spatial = sle_spatial
         self.disc_output_size = disc_output_size
         self.antialias = antialias
 
@@ -897,7 +850,6 @@ class Trainer():
             lr = self.lr,
             latent_dim = self.latent_dim,
             attn_res_layers = self.attn_res_layers,
-            sle_spatial = self.sle_spatial,
             image_size = self.image_size,
             ttur_mult = self.ttur_mult,
             fmap_max = self.fmap_max,
@@ -927,7 +879,6 @@ class Trainer():
         self.disc_output_size = config['disc_output_size']
         self.greyscale = config.pop('greyscale', False)
         self.attn_res_layers = config.pop('attn_res_layers', [])
-        self.sle_spatial = config.pop('sle_spatial', False)
         self.optimizer = config.pop('optimizer', 'adam')
         self.fmap_max = config.pop('fmap_max', 512)
         del self.GAN
@@ -941,8 +892,7 @@ class Trainer():
             'syncbatchnorm': self.syncbatchnorm,
             'disc_output_size': self.disc_output_size,
             'optimizer': self.optimizer,
-            'attn_res_layers': self.attn_res_layers,
-            'sle_spatial': self.sle_spatial
+            'attn_res_layers': self.attn_res_layers
         }
 
     def set_data_src(self, folder):
