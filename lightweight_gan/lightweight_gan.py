@@ -292,6 +292,8 @@ def upsample(scale_factor = 2):
 
 # classes
 
+# https://arxiv.org/abs/2012.13375
+# similar to squeeze-excite, but with a simplified attention pooling and a subsequent layer norm
 class GlobalContext(nn.Module):
     def __init__(
         self,
