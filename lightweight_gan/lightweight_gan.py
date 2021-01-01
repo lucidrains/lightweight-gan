@@ -307,9 +307,9 @@ class GlobalContext(nn.Module):
 
         self.net = nn.Sequential(
             nn.Conv2d(chan_in, chan_intermediate, 1),
-            nn.LayerNorm((chan_intermediate, 1, 1)),
             nn.LeakyReLU(0.1),
             nn.Conv2d(chan_intermediate, chan_out, 1),
+            nn.Sigmoid()
         )
     def forward(self, x):
         context = self.to_k(x)
@@ -419,7 +419,7 @@ class Generator(nn.Module):
 
             next_res = res + 1
             if next_res in residuals:
-                x = x + residuals[next_res]
+                x = x * residuals[next_res]
 
         return self.out_conv(x)
 

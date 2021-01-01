@@ -1,12 +1,12 @@
-<img src="./sample-512.jpg" width="600px"></img>
+<img src="./images/sample-512.jpg" width="600px"></img>
 
 *512x512 flowers after 12 hours of training, 1 gpu*
 
-<img src="./sample-256.jpg" width="400px"></img>
+<img src="./images/sample-256.jpg" width="400px"></img>
 
 *256x256 flowers after 12 hours of training, 1 gpu*
 
-<img src="./pizza-512.jpg" width="600px"></img>
+<img src="./images/pizza-512.jpg" width="600px"></img>
 
 *Pizza*
 
