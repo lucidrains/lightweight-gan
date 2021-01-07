@@ -85,6 +85,7 @@ def train_from_folder(
     save_every = 1000,
     evaluate_every = 1000,
     generate = False,
+    generate_types = ['default', 'ema'],
     generate_interpolation = False,
     aug_test = False,
     attn_res_layers = [32],
@@ -131,8 +132,9 @@ def train_from_folder(
         model = Trainer(**model_args)
         model.load(load_from)
         samples_name = timestamped_filename()
-        model.evaluate(samples_name, num_image_tiles)
-        print(f'sample images generated at {results_dir}/{name}/{samples_name}')
+        checkpoint = model.checkpoint_num
+        dir_result = model.generate(samples_name, num_image_tiles, checkpoint, generate_types)
+        print(f'sample images generated at {dir_result}')
         return
 
     if generate_interpolation:
