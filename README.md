@@ -106,8 +106,8 @@ Some of these works by default, some of these can be controlled from  a command 
 - `color` randomly change brightness, saturation and contrast;
 - `cutout` creates random black boxes on the image; 
 - `offset` randomly moves image by x and y-axis with repeating image;
-  - `offset_x` only by an x-axis;
-  - `offset_y` only by a y-axis;
+  - `offset_h` only by an x-axis;
+  - `offset_v` only by a y-axis;
 - `translation` randomly moves image on the canvas with black background;
 
 Full setup of augmentations is `--aug-types [color,cutout,offset,translation]`.  
