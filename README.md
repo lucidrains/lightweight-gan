@@ -152,8 +152,15 @@ Also one flag to use `--multi-gpus`
 Once you have finished training, you can generate samples with one command. You can select which checkpoint number to load from. If `--load-from` is not specified, will default to the latest.
 
 ```bash
-$ lightweight_gan --name {name of run} --load-from {checkpoint num} --generate
+$ lightweight_gan \
+  --name {name of run} \
+  --load-from {checkpoint num} \
+  --generate \
+  --generate-types {types of result, default: [default,ema]} \
+  --num-image-tiles {count of image result}
 ```
+
+After run this command you will get folder near results image folder with postfix "-generated-{checkpoint num}".
 
 You can also generate interpolations
 

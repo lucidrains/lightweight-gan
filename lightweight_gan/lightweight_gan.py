@@ -1089,6 +1089,36 @@ class Trainer():
         torchvision.utils.save_image(generated_images, str(self.results_dir / self.name / f'{str(num)}-ema.{ext}'), nrow=num_rows)
 
     @torch.no_grad()
+    def generate(self, num=0, num_image_tiles=4, checkpoint=None, types=['default', 'ema']):
+        self.GAN.eval()
+
+        latent_dim = self.GAN.latent_dim
+        dir_name = self.name + str('-generated-') + str(checkpoint)
+        dir_full = Path().absolute() / self.results_dir / dir_name
+        ext = self.image_extension
+
+        if not dir_full.exists():
+            os.mkdir(dir_full)
+
+        # regular
+        if 'default' in types:
+            for i in tqdm(range(num_image_tiles), desc='Saving generated default images'):
+                latents = torch.randn((1, latent_dim)).cuda(self.rank)
+                generated_image = self.generate_truncated(self.GAN.G, latents)
+                path = str(self.results_dir / dir_name / f'{str(num)}-{str(i)}.{ext}')
+                torchvision.utils.save_image(generated_image[0], path, nrow=1)
+
+        # moving averages
+        if 'ema' in types:
+            for i in tqdm(range(num_image_tiles), desc='Saving generated EMA images'):
+                latents = torch.randn((1, latent_dim)).cuda(self.rank)
+                generated_image = self.generate_truncated(self.GAN.GE, latents)
+                path = str(self.results_dir / dir_name / f'{str(num)}-{str(i)}-ema.{ext}')
+                torchvision.utils.save_image(generated_image[0], path, nrow=1)
+
+        return dir_full
+
+    @torch.no_grad()
     def calculate_fid(self, num_batches):
         from pytorch_fid import fid_score
         torch.cuda.empty_cache()
