@@ -722,6 +722,7 @@ class Trainer():
         optimizer="adam",
         latent_dim = 256,
         image_size = 128,
+        num_image_tiles = 8,
         fmap_max = 512,
         transparent = False,
         greyscale = False,
@@ -763,9 +764,10 @@ class Trainer():
         assert is_power_of_two(image_size), 'image size must be a power of 2 (64, 128, 256, 512, 1024)'
         assert all(map(is_power_of_two, attn_res_layers)), 'resolution layers of attention must all be powers of 2 (16, 32, 64, 128, 256, 512)'
 
-        self.optimizer = optimizer
-        self.latent_dim = latent_dim
         self.image_size = image_size
+        self.num_image_tiles = num_image_tiles
+
+        self.latent_dim = latent_dim
         self.fmap_max = fmap_max
         self.transparent = transparent
         self.greyscale = greyscale
@@ -776,6 +778,7 @@ class Trainer():
         self.aug_types = aug_types
 
         self.lr = lr
+        self.optimizer = optimizer
         self.ttur_mult = ttur_mult
         self.batch_size = batch_size
         self.gradient_accumulate_every = gradient_accumulate_every
@@ -1052,7 +1055,7 @@ class Trainer():
                 self.save(self.checkpoint_num)
 
             if self.steps % self.evaluate_every == 0 or (self.steps % 100 == 0 and self.steps < 20000):
-                self.evaluate(floor(self.steps / self.evaluate_every))
+                self.evaluate(floor(self.steps / self.evaluate_every), num_image_tiles = self.num_image_tiles)
 
             if exists(self.calculate_fid_every) and self.steps % self.calculate_fid_every == 0 and self.steps != 0:
                 num_batches = math.ceil(CALC_FID_NUM_IMAGES / self.batch_size)

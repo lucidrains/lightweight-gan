@@ -14,6 +14,12 @@ import torch.distributed as dist
 
 import numpy as np
 
+def exists(val):
+    return val is not None
+
+def default(val, d):
+    return val if exists(val) else d
+
 def cast_list(el):
     return el if isinstance(el, list) else [el]
 
@@ -93,7 +99,7 @@ def train_from_folder(
     antialias = False,
     interpolation_num_steps = 100,
     save_frames = False,
-    num_image_tiles = 8,
+    num_image_tiles = None,
     trunc_psi = 0.75,
     aug_prob = None,
     aug_types = ['cutout', 'translation'],
@@ -103,6 +109,8 @@ def train_from_folder(
     seed = 42,
     amp = False
 ):
+    num_image_tiles = default(num_image_tiles, 4 if image_size > 512 else 8)
+
     model_args = dict(
         name = name,
         results_dir = results_dir,
@@ -113,6 +121,7 @@ def train_from_folder(
         disc_output_size = disc_output_size,
         antialias = antialias,
         image_size = image_size,
+        num_image_tiles = num_image_tiles,
         optimizer = optimizer,
         fmap_max = fmap_max,
         transparent = transparent,
