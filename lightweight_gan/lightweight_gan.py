@@ -1065,7 +1065,7 @@ class Trainer():
         self.steps += 1
 
     @torch.no_grad()
-    def evaluate(self, num = 0, num_image_tiles = 8, trunc = 1.0):
+    def evaluate(self, num = 0, num_image_tiles = 4, trunc = 1.0):
         self.GAN.eval()
 
         ext = self.image_extension
