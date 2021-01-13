@@ -1157,7 +1157,7 @@ class Trainer():
             for j in range(generated_images.size(0)):
                 torchvision.utils.save_image(generated_images[j, :, :, :], str(Path(fake_path) / f'{str(j + batch_num * self.batch_size)}-ema.{ext}'))
 
-        return fid_score.calculate_fid_given_paths([real_path, fake_path], 256, True, 2048)
+        return fid_score.calculate_fid_given_paths([real_path, fake_path], 256, latents.device, 2048)
 
     @torch.no_grad()
     def generate_truncated(self, G, style, trunc_psi = 0.75, num_image_tiles = 8):
