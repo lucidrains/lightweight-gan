@@ -182,7 +182,9 @@ $ lightweight_gan \
 
 After run this command you will get folder near results image folder with postfix "-progress".
 
-![Show progress demonstration](./docs/show_progress/show-progress.mp4)
+![Show progress gif demonstration](./docs/show_progress/show-progress.gif)
+
+![Show progress video demonstration](./docs/show_progress/show-progress.mp4)
 
 ## Discriminator output size
 
