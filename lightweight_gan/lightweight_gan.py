@@ -1191,6 +1191,37 @@ class Trainer():
         return dir_full
 
     @torch.no_grad()
+    def show_progress(self, num_images=4, types=['default', 'ema']):
+        checkpoints = self.get_checkpoints()
+
+        dir_name = self.name + str('-progress')
+        dir_full = Path().absolute() / self.results_dir / dir_name
+        ext = self.image_extension
+        latents = None
+
+        if not dir_full.exists():
+            os.mkdir(dir_full)
+
+        for checkpoint in tqdm(checkpoints, desc='Generating progress images'):
+            self.load(checkpoint, print_version=False)
+            self.GAN.eval()
+
+            if checkpoint == 0:
+                latents = torch.randn((num_images, self.GAN.latent_dim)).cuda(self.rank)
+
+            # regular
+            if 'default' in types:
+                generated_image = self.generate_truncated(self.GAN.G, latents)
+                path = str(self.results_dir / dir_name / f'{str(checkpoint)}.{ext}')
+                torchvision.utils.save_image(generated_image, path, nrow=num_images)
+
+            # moving averages
+            if 'ema' in types:
+                generated_image = self.generate_truncated(self.GAN.GE, latents)
+                path = str(self.results_dir / dir_name / f'{str(checkpoint)}-ema.{ext}')
+                torchvision.utils.save_image(generated_image, path, nrow=num_images)
+
+    @torch.no_grad()
     def calculate_fid(self, num_batches):
         from pytorch_fid import fid_score
         torch.cuda.empty_cache()
@@ -1313,23 +1344,20 @@ class Trainer():
         torch.save(save_data, self.model_name(num))
         self.write_config()
 
-    def load(self, num = -1):
+    def load(self, num=-1, print_version=True):
         self.load_config()
 
         name = num
         if num == -1:
-            file_paths = [p for p in Path(self.models_dir / self.name).glob('model_*.pt')]
-            saved_nums = sorted(map(lambda x: int(x.stem.split('_')[1]), file_paths))
-            if len(saved_nums) == 0:
-                return
-            name = saved_nums[-1]
+            checkpoints = self.get_checkpoints()
+            name = checkpoints[-1]
             print(f'continuing from previous epoch - {name}')
 
         self.steps = name * self.save_every
 
         load_data = torch.load(self.model_name(name))
 
-        if 'version' in load_data and self.is_main:
+        if print_version and 'version' in load_data and self.is_main:
             print(f"loading from version {load_data['version']}")
 
         try:
@@ -1342,3 +1370,12 @@ class Trainer():
             self.G_scaler.load_state_dict(load_data['G_scaler'])
         if 'D_scaler' in load_data:
             self.D_scaler.load_state_dict(load_data['D_scaler'])
+
+    def get_checkpoints(self):
+        file_paths = [p for p in Path(self.models_dir / self.name).glob('model_*.pt')]
+        saved_nums = sorted(map(lambda x: int(x.stem.split('_')[1]), file_paths))
+
+        if len(saved_nums) == 0:
+            return
+
+        return saved_nums

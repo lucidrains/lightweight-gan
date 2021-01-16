@@ -168,6 +168,24 @@ You can also generate interpolations
 $ lightweight_gan --name {name of run} --generate-interpolation
 ```
 
+## Show progress
+
+After creating several checkpoints of model you can generate progress as sequence images by command:
+
+```bash
+$ lightweight_gan \
+  --name {name of run} \
+  --show-progress \
+  --generate-types {types of result, default: [default,ema]} \
+  --num-image-tiles {count of image result}
+```
+
+After run this command you will get folder near results image folder with postfix "-progress".
+
+![Show progress gif demonstration](./docs/show_progress/show-progress.gif)
+
+![Show progress video demonstration](./docs/show_progress/show-progress.mp4)
+
 ## Discriminator output size
 
 The author has kindly let me know that the discriminator output size (5x5 vs 1x1) leads to different results on different datasets. (5x5 works better for art than for faces, as an example). You can toggle this with a single flag

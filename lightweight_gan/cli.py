@@ -94,6 +94,9 @@ def train_from_folder(
     generate_types = ['default', 'ema'],
     generate_interpolation = False,
     aug_test = False,
+    aug_prob=None,
+    aug_types=['cutout', 'translation'],
+    dataset_aug_prob=0.,
     attn_res_layers = [32],
     freq_chan_attn = False,
     disc_output_size = 1,
@@ -102,15 +105,13 @@ def train_from_folder(
     save_frames = False,
     num_image_tiles = None,
     trunc_psi = 0.75,
-    aug_prob = None,
-    aug_types = ['cutout', 'translation'],
-    dataset_aug_prob = 0.,
     multi_gpus = False,
     calculate_fid_every = None,
     calculate_fid_num_images = 12800,
     clear_fid_cache = False,
     seed = 42,
-    amp = False
+    amp = False,
+    show_progress = False,
 ):
     num_image_tiles = default(num_image_tiles, 4 if image_size > 512 else 8)
 
@@ -158,6 +159,11 @@ def train_from_folder(
         samples_name = timestamped_filename()
         model.generate_interpolation(samples_name, num_image_tiles, num_steps = interpolation_num_steps, save_frames = save_frames)
         print(f'interpolation generated at {results_dir}/{name}/{samples_name}')
+        return
+
+    if show_progress:
+        model = Trainer(**model_args)
+        model.show_progress(num_images=num_image_tiles, types=generate_types)
         return
 
     if aug_test:
