@@ -1353,6 +1353,10 @@ class Trainer():
         name = num
         if num == -1:
             checkpoints = self.get_checkpoints()
+
+            if not exists(checkpoints):
+                return
+
             name = checkpoints[-1]
             print(f'continuing from previous epoch - {name}')
 
@@ -1379,6 +1383,6 @@ class Trainer():
         saved_nums = sorted(map(lambda x: int(x.stem.split('_')[1]), file_paths))
 
         if len(saved_nums) == 0:
-            return
+            return None
 
         return saved_nums
