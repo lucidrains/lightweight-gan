@@ -1254,11 +1254,8 @@ class Trainer():
 
         name = num
         if num == -1:
-            file_paths = [p for p in Path(self.models_dir / self.name).glob('model_*.pt')]
-            saved_nums = sorted(map(lambda x: int(x.stem.split('_')[1]), file_paths))
-            if len(saved_nums) == 0:
-                return
-            name = saved_nums[-1]
+            checkpoints = self.get_checkpoints()
+            name = checkpoints[-1]
             print(f'continuing from previous epoch - {name}')
 
         self.steps = name * self.save_every
@@ -1278,3 +1275,12 @@ class Trainer():
             self.G_scaler.load_state_dict(load_data['G_scaler'])
         if 'D_scaler' in load_data:
             self.D_scaler.load_state_dict(load_data['D_scaler'])
+
+    def get_checkpoints(self):
+        file_paths = [p for p in Path(self.models_dir / self.name).glob('model_*.pt')]
+        saved_nums = sorted(map(lambda x: int(x.stem.split('_')[1]), file_paths))
+
+        if len(saved_nums) == 0:
+            return
+
+        return saved_nums
