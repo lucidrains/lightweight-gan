@@ -28,7 +28,7 @@ from lightweight_gan.diff_augment import DiffAugment
 from lightweight_gan.version import __version__
 
 from tqdm import tqdm
-from einops import rearrange
+from einops import rearrange, reduce
 
 from adabelief_pytorch import AdaBelief
 from gsa_pytorch import GSA
@@ -289,10 +289,12 @@ norm_class = nn.BatchNorm2d
 def upsample(scale_factor = 2):
     return nn.Upsample(scale_factor = scale_factor)
 
-# classes
+# squeeze excitation classes
 
+# global context network
 # https://arxiv.org/abs/2012.13375
 # similar to squeeze-excite, but with a simplified attention pooling and a subsequent layer norm
+
 class GlobalContext(nn.Module):
     def __init__(
         self,
@@ -317,6 +319,52 @@ class GlobalContext(nn.Module):
         out = out.unsqueeze(-1)
         return self.net(out)
 
+# frequency channel attention
+# https://arxiv.org/abs/2012.11879
+
+def get_1d_dct(i, freq, L):
+    result = math.cos(math.pi * freq * (i + 0.5) / L) / math.sqrt(L)
+    return result * (1 if freq == 0 else math.sqrt(2))
+
+def get_dct_weights(width, channel, fidx_u, fidx_v):
+    dct_weights = torch.zeros(1, channel, width, width)
+    c_part = channel // len(fidx_u)
+
+    for i, (u_x, v_y) in enumerate(zip(fidx_u, fidx_v)):
+        for x in range(width):
+            for y in range(width):
+                coor_value = get_1d_dct(x, u_x, width) * get_1d_dct(y, v_y, width)
+                dct_weights[:, i * c_part: (i + 1) * c_part, x, y] = coor_value
+
+    return dct_weights
+
+class FCANet(nn.Module):
+    def __init__(
+        self,
+        *,
+        chan_in,
+        chan_out,
+        reduction = 4,
+        width
+    ):
+        super().__init__()
+        freq_w, freq_h = ([0] * 8), list(range(8)) # in paper, it seems 16 frequencies was ideal
+        dct_weights = get_dct_weights(width, chan_in, [*freq_w, *freq_h], [*freq_h, *freq_w])
+        self.register_buffer('dct_weights', dct_weights)
+
+        self.net = nn.Sequential(
+            nn.Conv2d(chan_in, chan_out // reduction, 1),
+            nn.LeakyReLU(0.1),
+            nn.Conv2d(chan_out // reduction, chan_out, 1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        x = reduce(x * self.dct_weights, 'b c (h h1) (w w1) -> b c h1 w1', 'sum', h1 = 1, w1 = 1)
+        return self.net(x)
+
+# generative adversarial network
+
 class Generator(nn.Module):
     def __init__(
         self,
@@ -327,7 +375,8 @@ class Generator(nn.Module):
         fmap_inverse_coef = 12,
         transparent = False,
         greyscale = False,
-        attn_res_layers = []
+        attn_res_layers = [],
+        freq_chan_attn = False
     ):
         super().__init__()
         resolution = log2(image_size)
@@ -378,10 +427,17 @@ class Generator(nn.Module):
                 residual_layer = self.sle_map[res]
                 sle_chan_out = self.res_to_feature_map[residual_layer - 1][-1]
 
-                sle = GlobalContext(
-                    chan_in = chan_out,
-                    chan_out = sle_chan_out
-                )
+                if freq_chan_attn:
+                    sle = FCANet(
+                        chan_in = chan_out,
+                        chan_out = sle_chan_out,
+                        width = 2 ** (res + 1)
+                    )
+                else:
+                    sle = GlobalContext(
+                        chan_in = chan_out,
+                        chan_out = sle_chan_out
+                    )
 
             layer = nn.ModuleList([
                 nn.Sequential(
@@ -636,6 +692,7 @@ class LightweightGAN(nn.Module):
         greyscale = False,
         disc_output_size = 5,
         attn_res_layers = [],
+        freq_chan_attn = False,
         ttur_mult = 1.,
         lr = 2e-4,
         rank = 0,
@@ -652,7 +709,8 @@ class LightweightGAN(nn.Module):
             fmap_inverse_coef = fmap_inverse_coef,
             transparent = transparent,
             greyscale = greyscale,
-            attn_res_layers = attn_res_layers
+            attn_res_layers = attn_res_layers,
+            freq_chan_attn = freq_chan_attn
         )
 
         self.G = Generator(**G_kwargs)
@@ -729,6 +787,7 @@ class Trainer():
         gp_weight = 10,
         gradient_accumulate_every = 1,
         attn_res_layers = [],
+        freq_chan_attn = False,
         disc_output_size = 5,
         antialias = False,
         lr = 2e-4,
@@ -796,6 +855,8 @@ class Trainer():
         self.generator_top_k_frac = 0.5
 
         self.attn_res_layers = attn_res_layers
+        self.freq_chan_attn = freq_chan_attn
+
         self.disc_output_size = disc_output_size
         self.antialias = antialias
 
@@ -860,6 +921,7 @@ class Trainer():
             lr = self.lr,
             latent_dim = self.latent_dim,
             attn_res_layers = self.attn_res_layers,
+            freq_chan_attn = self.freq_chan_attn,
             image_size = self.image_size,
             ttur_mult = self.ttur_mult,
             fmap_max = self.fmap_max,
@@ -889,6 +951,7 @@ class Trainer():
         self.disc_output_size = config['disc_output_size']
         self.greyscale = config.pop('greyscale', False)
         self.attn_res_layers = config.pop('attn_res_layers', [])
+        self.freq_chan_attn = config.pop('freq_chan_attn', False)
         self.optimizer = config.pop('optimizer', 'adam')
         self.fmap_max = config.pop('fmap_max', 512)
         del self.GAN
@@ -902,7 +965,8 @@ class Trainer():
             'syncbatchnorm': self.syncbatchnorm,
             'disc_output_size': self.disc_output_size,
             'optimizer': self.optimizer,
-            'attn_res_layers': self.attn_res_layers
+            'attn_res_layers': self.attn_res_layers,
+            'freq_chan_attn': self.freq_chan_attn
         }
 
     def set_data_src(self, folder):

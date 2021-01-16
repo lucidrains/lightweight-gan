@@ -241,6 +241,16 @@ If you want the current state of the art GAN, you can find it at https://github.
 }
 ```
 
+```bibtex
+@misc{qin2020fcanet,
+    title={FcaNet: Frequency Channel Attention Networks},
+    author={Zequn Qin and Pengyi Zhang and Fei Wu and Xi Li},
+    year={2020},
+    eprint={2012.11879},
+    archivePrefix={arXiv},
+    primaryClass={cs.CV}
+}
+```
 
 ```bibtex
 @misc{sinha2020topk,
