@@ -1196,6 +1196,7 @@ class Trainer():
     @torch.no_grad()
     def show_progress(self, num_images=4, types=['default', 'ema']):
         checkpoints = self.get_checkpoints()
+        assert exists(checkpoints), 'cannot find any checkpoints to create a training progress video for'
 
         dir_name = self.name + str('-progress')
         dir_full = Path().absolute() / self.results_dir / dir_name
