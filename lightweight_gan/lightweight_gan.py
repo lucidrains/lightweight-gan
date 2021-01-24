@@ -33,8 +33,6 @@ from einops import rearrange, reduce
 from adabelief_pytorch import AdaBelief
 from gsa_pytorch import GSA
 
-from scipy.stats import truncnorm
-
 # asserts
 
 assert torch.cuda.is_available(), 'You need to have an Nvidia GPU with CUDA installed.'
@@ -109,10 +107,6 @@ def slerp(val, low, high):
     so = torch.sin(omega)
     res = (torch.sin((1.0 - val) * omega) / so).unsqueeze(1) * low + (torch.sin(val * omega) / so).unsqueeze(1) * high
     return res
-
-def truncated_normal(size, threshold = 1.5):
-    values = truncnorm.rvs(-threshold, threshold, size = size)
-    return torch.from_numpy(values)
 
 # helper classes
 
@@ -779,7 +773,8 @@ class Trainer():
         results_dir = 'results',
         models_dir = 'models',
         base_dir = './',
-        optimizer="adam",
+        optimizer = 'adam',
+        num_workers = None,
         latent_dim = 256,
         image_size = 128,
         num_image_tiles = 8,
@@ -798,7 +793,6 @@ class Trainer():
         ttur_mult = 1.,
         save_every = 1000,
         evaluate_every = 1000,
-        trunc_psi = 0.6,
         aug_prob = None,
         aug_types = ['translation', 'cutout'],
         dataset_aug_prob = 0.,
@@ -844,6 +838,7 @@ class Trainer():
 
         self.lr = lr
         self.optimizer = optimizer
+        self.num_workers = num_workers
         self.ttur_mult = ttur_mult
         self.batch_size = batch_size
         self.gradient_accumulate_every = gradient_accumulate_every
@@ -973,9 +968,10 @@ class Trainer():
         }
 
     def set_data_src(self, folder):
+        num_workers = default(self.num_workers, math.ceil(NUM_CORES / self.world_size))
         self.dataset = ImageDataset(folder, self.image_size, transparent = self.transparent, greyscale = self.greyscale, aug_prob = self.dataset_aug_prob)
         sampler = DistributedSampler(self.dataset, rank=self.rank, num_replicas=self.world_size, shuffle=True) if self.is_ddp else None
-        dataloader = DataLoader(self.dataset, num_workers = math.ceil(NUM_CORES / self.world_size), batch_size = math.ceil(self.batch_size / self.world_size), sampler = sampler, shuffle = not self.is_ddp, drop_last = True, pin_memory = True)
+        dataloader = DataLoader(self.dataset, num_workers = num_workers, batch_size = math.ceil(self.batch_size / self.world_size), sampler = sampler, shuffle = not self.is_ddp, drop_last = True, pin_memory = True)
         self.loader = cycle(dataloader)
 
         # auto set augmentation prob for user if dataset is detected to be low
@@ -1140,7 +1136,7 @@ class Trainer():
         self.steps += 1
 
     @torch.no_grad()
-    def evaluate(self, num = 0, num_image_tiles = 4, trunc = 1.0):
+    def evaluate(self, num = 0, num_image_tiles = 4):
         self.GAN.eval()
 
         ext = self.image_extension
@@ -1155,12 +1151,12 @@ class Trainer():
 
         # regular
 
-        generated_images = self.generate_truncated(self.GAN.G, latents)
+        generated_images = self.generate_(self.GAN.G, latents)
         torchvision.utils.save_image(generated_images, str(self.results_dir / self.name / f'{str(num)}.{ext}'), nrow=num_rows)
         
         # moving averages
 
-        generated_images = self.generate_truncated(self.GAN.GE, latents)
+        generated_images = self.generate_(self.GAN.GE, latents)
         torchvision.utils.save_image(generated_images, str(self.results_dir / self.name / f'{str(num)}-ema.{ext}'), nrow=num_rows)
 
     @torch.no_grad()
@@ -1179,7 +1175,7 @@ class Trainer():
         if 'default' in types:
             for i in tqdm(range(num_image_tiles), desc='Saving generated default images'):
                 latents = torch.randn((1, latent_dim)).cuda(self.rank)
-                generated_image = self.generate_truncated(self.GAN.G, latents)
+                generated_image = self.generate_(self.GAN.G, latents)
                 path = str(self.results_dir / dir_name / f'{str(num)}-{str(i)}.{ext}')
                 torchvision.utils.save_image(generated_image[0], path, nrow=1)
 
@@ -1187,7 +1183,7 @@ class Trainer():
         if 'ema' in types:
             for i in tqdm(range(num_image_tiles), desc='Saving generated EMA images'):
                 latents = torch.randn((1, latent_dim)).cuda(self.rank)
-                generated_image = self.generate_truncated(self.GAN.GE, latents)
+                generated_image = self.generate_(self.GAN.GE, latents)
                 path = str(self.results_dir / dir_name / f'{str(num)}-{str(i)}-ema.{ext}')
                 torchvision.utils.save_image(generated_image[0], path, nrow=1)
 
@@ -1215,13 +1211,13 @@ class Trainer():
 
             # regular
             if 'default' in types:
-                generated_image = self.generate_truncated(self.GAN.G, latents)
+                generated_image = self.generate_(self.GAN.G, latents)
                 path = str(self.results_dir / dir_name / f'{str(checkpoint)}.{ext}')
                 torchvision.utils.save_image(generated_image, path, nrow=num_images)
 
             # moving averages
             if 'ema' in types:
-                generated_image = self.generate_truncated(self.GAN.GE, latents)
+                generated_image = self.generate_(self.GAN.GE, latents)
                 path = str(self.results_dir / dir_name / f'{str(checkpoint)}-ema.{ext}')
                 torchvision.utils.save_image(generated_image, path, nrow=num_images)
 
@@ -1260,7 +1256,7 @@ class Trainer():
             latents = torch.randn(self.batch_size, latent_dim).cuda(self.rank)
 
             # moving averages
-            generated_images = self.generate_truncated(self.GAN.GE, latents)
+            generated_images = self.generate_(self.GAN.GE, latents)
 
             for j, image in enumerate(generated_images.unbind(0)):
                 ind = j + batch_num * self.batch_size
@@ -1269,12 +1265,12 @@ class Trainer():
         return fid_score.calculate_fid_given_paths([str(real_path), str(fake_path)], 256, latents.device, 2048)
 
     @torch.no_grad()
-    def generate_truncated(self, G, style, trunc_psi = 0.75, num_image_tiles = 8):
+    def generate_(self, G, style, num_image_tiles = 8):
         generated_images = evaluate_in_chunks(self.batch_size, G, style)
         return generated_images.clamp_(0., 1.)
 
     @torch.no_grad()
-    def generate_interpolation(self, num = 0, num_image_tiles = 8, trunc = 1.0, num_steps = 100, save_frames = False):
+    def generate_interpolation(self, num = 0, num_image_tiles = 8, num_steps = 100, save_frames = False):
         self.GAN.eval()
         ext = self.image_extension
         num_rows = num_image_tiles
@@ -1292,7 +1288,7 @@ class Trainer():
         frames = []
         for ratio in tqdm(ratios):
             interp_latents = slerp(ratio, latents_low, latents_high)
-            generated_images = self.generate_truncated(self.GAN.GE, interp_latents)
+            generated_images = self.generate_(self.GAN.GE, interp_latents)
             images_grid = torchvision.utils.make_grid(generated_images, nrow = num_rows)
             pil_image = transforms.ToPILImage()(images_grid.cpu())
             

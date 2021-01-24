@@ -32,7 +32,6 @@ setup(
     'numpy',
     'pillow',
     'retry',
-    'scipy',
     'torch>=1.6',
     'torchvision',
     'tqdm'
