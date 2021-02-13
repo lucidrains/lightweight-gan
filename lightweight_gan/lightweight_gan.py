@@ -108,6 +108,14 @@ def slerp(val, low, high):
     res = (torch.sin((1.0 - val) * omega) / so).unsqueeze(1) * low + (torch.sin(val * omega) / so).unsqueeze(1) * high
     return res
 
+def safe_div(n, d):
+    try:
+        res = n / d
+    except ZeroDivisionError:
+        prefix = '' if int(n >= 0) else '-'
+        res = float(f'{prefix}inf')
+    return res
+
 # helper classes
 
 class NanException(Exception):
@@ -1043,16 +1051,18 @@ class Trainer():
                                        grad_outputs=list(map(lambda t: torch.ones(t.size(), device = image_batch.device), outputs)),
                                        create_graph=True, retain_graph=True, only_inputs=True)[0]
 
-                inv_scale = (1. / self.D_scaler.get_scale()) if self.amp else 1.
-                gradients = scaled_gradients * inv_scale
+                inv_scale = safe_div(1., self.D_scaler.get_scale()) if self.amp else 1.
 
-                with amp_context():
-                    gradients = gradients.reshape(batch_size, -1)
-                    gp =  self.gp_weight * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
+                if inv_scale != float('inf'):
+                    gradients = scaled_gradients * inv_scale
 
-                    if not torch.isnan(gp):
-                        disc_loss = disc_loss + gp
-                        self.last_gp_loss = gp.clone().detach().item()
+                    with amp_context():
+                        gradients = gradients.reshape(batch_size, -1)
+                        gp =  self.gp_weight * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
+
+                        if not torch.isnan(gp):
+                            disc_loss = disc_loss + gp
+                            self.last_gp_loss = gp.clone().detach().item()
 
             with amp_context():
                 disc_loss = disc_loss / self.gradient_accumulate_every
