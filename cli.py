@@ -91,9 +91,6 @@ def train_from_dataset(
     num_image_tiles=None,
     num_workers=None,
     multi_gpus=False,
-    calculate_fid_every=None,
-    calculate_fid_num_images=12800,
-    clear_fid_cache=False,
     seed=42,
     show_progress=False,
 ):
@@ -121,9 +118,6 @@ def train_from_dataset(
         aug_prob=aug_prob,
         aug_types=cast_list(aug_types),
         dataset_aug_prob=dataset_aug_prob,
-        calculate_fid_every=calculate_fid_every,
-        calculate_fid_num_images=calculate_fid_num_images,
-        clear_fid_cache=clear_fid_cache,
     )
 
     if generate:
