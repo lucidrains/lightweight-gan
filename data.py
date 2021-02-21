@@ -11,6 +11,17 @@ from torchvision import transforms
 from util import dose2locs, loc2dose
 
 
+def transforms1(image_size, aug_prob):
+    return [
+        transforms.Resize(image_size),
+        transforms.RandomCrop(256),
+        transforms.RandomPerspective(p=aug_prob),
+        transforms.RandomErasing(p=aug_prob),
+        # transforms.ColorJitter(saturation=.1, contrast=.1)
+        # RandomApply(aug_prob, transforms.RandomResizedCrop(image_size, scale=(0.5, 1.0), ratio=(0.98, 1.02)), transforms.CenterCrop(image_size)),
+    ]
+
+
 class ImageDataset(Dataset):
     def __init__(self, folder, image_size, chans=[0,1,2,3,4], train=True, norm_f=None,
                  aug_prob=0., doses=[0.0], label=False):
@@ -36,14 +47,8 @@ class ImageDataset(Dataset):
         #convert_image_fn = convert_transparent_to_rgb if not transparent else convert_rgb_to_transparent
         self.chans = chans 
 
-        self.transform = transforms.Compose([
-            transforms.Resize(image_size),
-            transforms.RandomCrop(256),
-            transforms.RandomPerspective(p=aug_prob),
-            transforms.RandomErasing(p=aug_prob),
-            # transforms.ColorJitter(saturation=.1, contrast=.1)
-            # RandomApply(aug_prob, transforms.RandomResizedCrop(image_size, scale=(0.5, 1.0), ratio=(0.98, 1.02)), transforms.CenterCrop(image_size)),
-        ])
+        self.transform = transforms.Compose(transforms1(image_size, aug_prob))
+        
 
     def __len__(self):
         return len(self.paths)
