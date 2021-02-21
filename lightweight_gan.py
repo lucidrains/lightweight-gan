@@ -949,14 +949,13 @@ class Trainer():
             disc_loss = disc_loss / self.gradient_accumulate_every
 
             disc_loss.register_hook(raise_if_nan)
-            self.D_scaler.scale(disc_loss).backward()
+            disc_loss.backward()
             total_disc_loss += divergence
 
         self.last_recon_loss = aux_loss.item()
         self.d_loss = float(total_disc_loss.item() /
                             self.gradient_accumulate_every)
-        self.D_scaler.step(self.GAN.D_opt)
-        self.D_scaler.update()
+        self.GAN.D_opt.step()
 
         # train generator
 
@@ -986,7 +985,7 @@ class Trainer():
             gen_loss = gen_loss / self.gradient_accumulate_every
 
             gen_loss.register_hook(raise_if_nan)
-            self.G_scaler.scale(gen_loss).backward()
+            gen_loss.backward()
             total_gen_loss += loss
 
         self.g_loss = float(total_gen_loss.item() /
