@@ -731,6 +731,7 @@ class Trainer():
         *args,
         **kwargs
     ):
+        self.image_extension = ".jpg" if num_chans == 3 else (raise NotImplementedError)
         self.GAN_params = [args, kwargs]
         self.GAN = None
 
