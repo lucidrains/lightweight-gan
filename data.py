@@ -26,7 +26,7 @@ class DoseCurveDataset(Dataset):
 
         if doses == "all":
             doses = dose2locs.keys()
-        w = w or (3 if train else 0)
+        #w = w or (3 if train else 0)
         
         def paths(folder, doses):
             not_52 = re.compile('/[^(52)]')
