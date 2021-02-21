@@ -111,5 +111,6 @@ def transfer_vis(transfer, batch_content, batch_style, ms):
     f = lambda x: x*std + mean
     
 class identity(object):
-    def __call__(self, tensor):
+    @staticmethod
+    def __call__(tensor):
         return tensor
