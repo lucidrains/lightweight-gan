@@ -914,8 +914,8 @@ class Trainer():
             with torch.no_grad():
                 generated_images = G(latents)
 
-            fake_output, fake_output_32x32, _ = D_aug(
-                generated_images, detach=True, **aug_kwargs)
+                fake_output, fake_output_32x32, _ = D_aug(
+                    generated_images, **aug_kwargs)
 
             real_output, real_output_32x32, real_aux_loss = D_aug(
                 image_batch,  calc_aux_loss=True, **aug_kwargs)
