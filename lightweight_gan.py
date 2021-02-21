@@ -932,27 +932,19 @@ class Trainer():
 
             if apply_gradient_penalty:
                 outputs = [real_output, real_output_32x32]
-                outputs = list(map(self.D_scaler.scale, outputs)
-                               ) if self.amp else outputs
 
-                scaled_gradients = torch_grad(outputs=outputs, inputs=image_batch,
+                gradients = torch_grad(outputs=outputs, inputs=image_batch,
                                               grad_outputs=list(map(lambda t: torch.ones(
                                                   t.size(), device=image_batch.device), outputs)),
                                               create_graph=True, retain_graph=True, only_inputs=True)[0]
 
-                inv_scale = safe_div(
-                    1., self.D_scaler.get_scale()) if self.amp else 1.
+                gradients = gradients.reshape(batch_size, -1)
+                gp = self.gp_weight * \
+                    ((gradients.norm(2, dim=1) - 1) ** 2).mean()
 
-                if inv_scale != float('inf'):
-                    gradients = scaled_gradients * inv_scale
-
-                    gradients = gradients.reshape(batch_size, -1)
-                    gp = self.gp_weight * \
-                        ((gradients.norm(2, dim=1) - 1) ** 2).mean()
-
-                    if not torch.isnan(gp):
-                        disc_loss = disc_loss + gp
-                        self.last_gp_loss = gp.clone().detach().item()
+                if not torch.isnan(gp):
+                    disc_loss = disc_loss + gp
+                    self.last_gp_loss = gp.clone().detach().item()
 
             disc_loss = disc_loss / self.gradient_accumulate_every
 
