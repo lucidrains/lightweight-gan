@@ -248,7 +248,7 @@ class FCANet(nn.Module):
         self,
         *,
         chan_in,
-        chan_out,\s
+        chan_out,
         reduction=4,
         width
     ):
