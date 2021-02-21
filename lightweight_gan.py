@@ -994,10 +994,10 @@ class Trainer():
 
         # calculate moving averages
 
-        if self.is_main and self.steps % 10 == 0 and self.steps > 20000:
+        if self.steps % 10 == 0 and self.steps > 20000:
             self.GAN.EMA()
 
-        if self.is_main and self.steps <= 25000 and self.steps % 1000 == 2:
+        if self.steps <= 25000 and self.steps % 1000 == 2:
             self.GAN.reset_parameter_averaging()
 
         # save from NaN errors
@@ -1013,22 +1013,21 @@ class Trainer():
 
         # periodically save results
 
-        if self.is_main:
-            if self.steps % self.save_every == 0:
-                self.save(self.checkpoint_num)
+        if self.steps % self.save_every == 0:
+            self.save(self.checkpoint_num)
 
-            if self.steps % self.evaluate_every == 0 or (self.steps % 100 == 0 and self.steps < 20000):
-                self.evaluate(floor(self.steps / self.evaluate_every),
-                              num_image_tiles=self.num_image_tiles)
+        if self.steps % self.evaluate_every == 0 or (self.steps % 100 == 0 and self.steps < 20000):
+            self.evaluate(floor(self.steps / self.evaluate_every),
+                            num_image_tiles=self.num_image_tiles)
 
-            if exists(self.calculate_fid_every) and self.steps % self.calculate_fid_every == 0 and self.steps != 0:
-                num_batches = math.ceil(
-                    self.calculate_fid_num_images / self.batch_size)
-                fid = self.calculate_fid(num_batches)
-                self.last_fid = fid
+        if exists(self.calculate_fid_every) and self.steps % self.calculate_fid_every == 0 and self.steps != 0:
+            num_batches = math.ceil(
+                self.calculate_fid_num_images / self.batch_size)
+            fid = self.calculate_fid(num_batches)
+            self.last_fid = fid
 
-                with open(str(self.results_dir / self.name / f'fid_scores.txt'), 'a') as f:
-                    f.write(f'{self.steps},{fid}\n')
+            with open(str(self.results_dir / self.name / f'fid_scores.txt'), 'a') as f:
+                f.write(f'{self.steps},{fid}\n')
 
         self.steps += 1
 
@@ -1225,7 +1224,7 @@ class Trainer():
 
         load_data = torch.load(self.model_name(name))
 
-        if print_version and 'version' in load_data and self.is_main:
+        if print_version and 'version' in load_data:
             print(f"loading from version {load_data['version']}")
 
         try:
