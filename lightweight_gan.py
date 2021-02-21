@@ -12,9 +12,8 @@ import torch
 from torch.optim import Adam
 from torch import nn, einsum
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 from torch.autograd import grad as torch_grad
-from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from PIL import Image

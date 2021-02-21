@@ -4,7 +4,6 @@ from random import random
 
 import torch
 from more_itertools import flatten
-from torch import nn
 from torch.utils.data import Dataset
 from torchvision import transforms
 
