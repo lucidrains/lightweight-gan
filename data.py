@@ -14,7 +14,7 @@ from util import dose2locs, loc2dose
 def transforms1(image_size, aug_prob):
     return [
         transforms.Resize(image_size),
-        transforms.RandomCrop(256),
+        transforms.RandomCrop(image_size),
         transforms.RandomPerspective(p=aug_prob),
         transforms.RandomErasing(p=aug_prob),
         # transforms.ColorJitter(saturation=.1, contrast=.1)
