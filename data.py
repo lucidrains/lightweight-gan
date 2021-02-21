@@ -15,7 +15,7 @@ def transforms1(image_size, aug_prob):
     return [
         transforms.Resize(image_size),
         transforms.RandomAffine(5, (.05, .05), (1, 1), 5, Image.BILINEAR),
-        transforms.Resize(image_size*1.1), 
+        transforms.Resize(int(image_size*1.1)), 
         transforms.CenterCrop(image_size)
         
     ]
