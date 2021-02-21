@@ -878,7 +878,7 @@ class Trainer():
     def train(self):
         assert exists(
             self.loader), 'You must first initialize the data source with `.set_data_src(<folder of images>)`'
-        device = torch.device(f'cuda:{self.rank}')
+        device = torch.device("cuda")
 
         if not exists(self.GAN):
             self.init_GAN()
@@ -907,8 +907,8 @@ class Trainer():
         # train discriminator
         self.GAN.D_opt.zero_grad()
         for i in range(self.gradient_accumulate_every):
-            latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
-            image_batch = next(self.loader).cuda(self.rank)
+            latents = torch.randn(batch_size, latent_dim).cuda()
+            image_batch = next(self.loader).cuda()
             image_batch.requires_grad_()
 
             with torch.no_grad():
@@ -971,7 +971,7 @@ class Trainer():
         self.GAN.G_opt.zero_grad()
 
         for i in range(self.gradient_accumulate_every):
-            latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
+            latents = torch.randn(batch_size, latent_dim).cuda()
 
             generated_images = G(latents)
             fake_output, fake_output_32x32, _ = D_aug(
@@ -1053,7 +1053,7 @@ class Trainer():
 
         # latents and noise
 
-        latents = torch.randn((num_rows ** 2, latent_dim)).cuda(self.rank)
+        latents = torch.randn((num_rows ** 2, latent_dim)).cuda()
 
         # regular
 
@@ -1082,7 +1082,7 @@ class Trainer():
         # regular
         if 'default' in types:
             for i in tqdm(range(num_image_tiles), desc='Saving generated default images'):
-                latents = torch.randn((1, latent_dim)).cuda(self.rank)
+                latents = torch.randn((1, latent_dim)).cuda()
                 generated_image = self.generate_(self.GAN.G, latents)
                 path = str(self.results_dir / dir_name /
                            f'{str(num)}-{str(i)}.{ext}')
@@ -1091,7 +1091,7 @@ class Trainer():
         # moving averages
         if 'ema' in types:
             for i in tqdm(range(num_image_tiles), desc='Saving generated EMA images'):
-                latents = torch.randn((1, latent_dim)).cuda(self.rank)
+                latents = torch.randn((1, latent_dim)).cuda()
                 generated_image = self.generate_(self.GAN.GE, latents)
                 path = str(self.results_dir / dir_name /
                            f'{str(num)}-{str(i)}-ema.{ext}')
@@ -1119,7 +1119,7 @@ class Trainer():
 
             if checkpoint == 0:
                 latents = torch.randn(
-                    (num_images, self.GAN.latent_dim)).cuda(self.rank)
+                    (num_images, self.GAN.latent_dim)).cuda()
 
             # regular
             if 'default' in types:
@@ -1153,8 +1153,8 @@ class Trainer():
 
         # latents and noise
 
-        latents_low = torch.randn(num_rows ** 2, latent_dim).cuda(self.rank)
-        latents_high = torch.randn(num_rows ** 2, latent_dim).cuda(self.rank)
+        latents_low = torch.randn(num_rows ** 2, latent_dim).cuda()
+        latents_high = torch.randn(num_rows ** 2, latent_dim).cuda()
 
         ratios = torch.linspace(0., 8., num_steps)
 
