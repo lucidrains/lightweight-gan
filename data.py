@@ -14,11 +14,10 @@ from PIL import Image
 def transforms1(image_size, aug_prob):
     return [
         transforms.Resize(image_size),
-        transforms.RandomCrop(image_size),
-        transforms.RandomAffine(5, (.05, .05), (1, 1), 5, Image.BILINEAR)
-        #transforms.RandomErasing(p=aug_prob),
-        # transforms.ColorJitter(saturation=.1, contrast=.1)
-        # RandomApply(aug_prob, transforms.RandomResizedCrop(image_size, scale=(0.5, 1.0), ratio=(0.98, 1.02)), transforms.CenterCrop(image_size)),
+        transforms.RandomAffine(5, (.05, .05), (1, 1), 5, Image.BILINEAR),
+        transforms.Resize(image_size*1.1), 
+        transforms.CenterCrop(image_size)
+        
     ]
 
 
