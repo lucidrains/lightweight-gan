@@ -48,7 +48,7 @@ def run_training(model_args, dataset, load_from, new, num_train_steps, name, see
     else:
         model.clear()
 
-    model.set_dataset(dataset)
+    model.set_dataset(dataset, num_workers=8)
 
     for i in tqdm(range(num_train_steps - model.steps), initial=model.steps, total=num_train_steps, mininterval=10., desc=f'{name}<{dataset}>'):
         retry_call(model.train, tries=3, exceptions=NanException)
