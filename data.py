@@ -36,12 +36,12 @@ class DoseCurveDataset(Dataset):
             return [p for p in gen if not_52.search(str(p))]
 
         self.dose2id = {k: i for i, k in enumerate(doses)}
-        self.f = d8 if train else identity
+        self.f = d8 if train else identity()
         super().__init__()
         self.folder = folder
         self.image_size = image_size
         self.label = label
-        self.norm_f = norm_f or identity
+        self.norm_f = norm_f or identity()
 
         self.paths = paths(folder, doses)
         assert len(self.paths) > 0, f'No images were found in {folder} for training'
