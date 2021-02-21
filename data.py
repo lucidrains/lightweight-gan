@@ -22,10 +22,13 @@ def transforms1(image_size, aug_prob):
     ]
 
 
-class ImageDataset(Dataset):
+class DoseCurveDataset(Dataset):
     def __init__(self, folder, image_size, chans=[0,1,2,3,4], train=True, norm_f=None,
-                 aug_prob=0., doses=[0.0], label=False):
+                 aug_prob=0., doses="all", label=False):
 
+        if doses == "all":
+            doses = dose2locs.keys()
+            
         def paths(folder, doses):
             not_52 = re.compile('/[^(52)]')
             assays = flatten(dose2locs[dose] for dose in doses)
