@@ -960,11 +960,11 @@ class Trainer():
 
 
             fake_output, fake_output_32x32, _ = Y(latents, True, **aug_kwargs)
-            fake_output = fake_output.mean(); fake_output_32x32 = fake_output_32x32.mean()
+            # fake_output = fake_output.mean(); fake_output_32x32 = fake_output_32x32.mean()
             
             real_output, real_output_32x32, real_aux_loss = D_aug(
                 image_batch,  calc_aux_loss=True, **aug_kwargs)
-            real_output = real_output.mean(); real_output_32x32 = real_output_32x32.mean()
+            # real_output = real_output.mean(); real_output_32x32 = real_output_32x32.mean()
 
 
             real_output_loss = real_output
