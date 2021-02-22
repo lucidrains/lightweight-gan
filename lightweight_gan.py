@@ -781,7 +781,7 @@ class Trainer():
         dataset_aug_prob=0.,
         rank=0,
         world_size=1,
-        multi_gpu=False,
+        multi_gpus=False,
         *args,
         **kwargs
     ):
@@ -847,7 +847,7 @@ class Trainer():
         self.is_main = rank == 0
         self.rank = rank
         self.world_size = world_size
-        self.multi_gpu = multi_gpu
+        self.multi_gpus = multi_gpus
 
     @property
     def image_extension(self):
@@ -944,8 +944,8 @@ class Trainer():
 
         G = self.GAN.G
         D = self.GAN.D
-        D_aug = nn.DataParallel(self.GAN.D_aug) if self.multi_gpu else self.GAN.D_aug
-        Y = nn.DataParallel(self.GAN) if self.multi_gpu else self.GAN
+        D_aug = nn.DataParallel(self.GAN.D_aug) if self.multi_gpus else self.GAN.D_aug
+        Y = nn.DataParallel(self.GAN) if self.multi_gpus else self.GAN
     
         apply_gradient_penalty = self.steps % 4 == 0
 
