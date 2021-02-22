@@ -966,7 +966,7 @@ class Trainer():
                 image_batch,  calc_aux_loss=True, **aug_kwargs)
 
             real_output_loss = real_output
-            fake_output_loss = fake_output
+            fake_output_loss = fake_output  # TODO: is this shape good?
 
             divergence = hinge_loss(real_output_loss, fake_output_loss)
             divergence_32x32 = hinge_loss(real_output_32x32, fake_output_32x32)
@@ -999,7 +999,7 @@ class Trainer():
             disc_loss = disc_loss / self.gradient_accumulate_every
 
             disc_loss.register_hook(raise_if_nan)
-            disc_loss.backward()
+            disc_loss.mean().backward()
             total_disc_loss += divergence
 
         self.last_recon_loss = aux_loss.item()
