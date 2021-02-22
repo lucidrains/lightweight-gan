@@ -1015,8 +1015,9 @@ class Trainer():
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, False, ddps=[D_aug, G]):
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
 
-            fake_output, fake_output_32x32, _ = Y(latents, False, **aug_kwargs)
-            fake_output = fake_output.mean(); fake_output_32x32 = fake_output_32x32.mean()
+            generated_images = G(latents)
+            fake_output, fake_output_32x32, _ = D_aug(generated_images, **aug_kwargs)
+            fake_output_loss = fake_output.mean(dim = 1) + fake_output_32x32.mean(dim = 1)
 
             
             fake_output_loss = fake_output.mean(
