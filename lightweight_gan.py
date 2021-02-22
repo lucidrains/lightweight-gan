@@ -996,10 +996,10 @@ class Trainer():
                         disc_loss = disc_loss + gp
                         self.last_gp_loss = gp.clone().detach().item()
 
-            disc_loss = disc_loss / self.gradient_accumulate_every
+            disc_loss = (disc_loss / self.gradient_accumulate_every).mean()
 
             disc_loss.register_hook(raise_if_nan)
-            disc_loss.mean().backward()
+            disc_loss.backward()
             total_disc_loss += divergence
 
         self.last_recon_loss = aux_loss.item()
