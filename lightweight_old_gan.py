@@ -902,7 +902,8 @@ class Trainer():
         
     def init_GAN(self):
         args, kwargs = self.GAN_params
-
+        kwargs.pop("num_chans")
+        
         # set some global variables before instantiating GAN
 
         global norm_class
