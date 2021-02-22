@@ -960,11 +960,12 @@ class Trainer():
 
 
             fake_output, fake_output_32x32, _ = Y(latents, True, **aug_kwargs)
-            print(fake_output.shape, fake_output_32x32.shape)
-
+            fake_output = fake_output.mean(); fake_output_32x32 = fake_output_32x32.mean()
+            
             real_output, real_output_32x32, real_aux_loss = D_aug(
                 image_batch,  calc_aux_loss=True, **aug_kwargs)
-            print(real_output.shape, real_output_32x32.shape)
+            real_output = real_output.mean(); real_output_32x32 = real_output_32x32.mean()
+
 
             real_output_loss = real_output
             fake_output_loss = fake_output  # TODO: is this shape good?
@@ -997,7 +998,7 @@ class Trainer():
                         disc_loss = disc_loss + gp
                         self.last_gp_loss = gp.clone().detach().item()
 
-            disc_loss = (disc_loss / self.gradient_accumulate_every).mean()
+            disc_loss = disc_loss / self.gradient_accumulate_every)
 
             disc_loss.register_hook(raise_if_nan)
             disc_loss.backward()
@@ -1015,6 +1016,8 @@ class Trainer():
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
 
             fake_output, fake_output_32x32, _ = Y(latents, False, **aug_kwargs)
+            fake_output = fake_output.mean(); fake_output_32x32 = fake_output_32x32.mean()
+
             
             fake_output_loss = fake_output.mean(
                 dim=1) + fake_output_32x32.mean(dim=1)
