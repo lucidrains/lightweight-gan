@@ -1041,7 +1041,7 @@ class Trainer():
             total_gen_loss += loss
 
         self.g_loss = float(total_gen_loss.item() /
-                            self.gradient_accumulate_every)
+                            self.gradient_accumulate_every
         self.GAN.G_opt.step()
 
         # calculate moving averages
