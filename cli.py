@@ -118,6 +118,7 @@ def train_from_dataset(
         aug_prob=aug_prob,
         aug_types=cast_list(aug_types),
         dataset_aug_prob=dataset_aug_prob,
+        multi_gpus=multi_gpus,
     )
 
     if generate:
