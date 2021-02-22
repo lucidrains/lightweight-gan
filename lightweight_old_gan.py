@@ -185,82 +185,6 @@ class identity(object):
     def __call__(self, tensor):
         return tensor
 
-class expand_greyscale(object):
-    def __init__(self, transparent):
-        self.transparent = transparent
-
-    def __call__(self, tensor):
-        channels = tensor.shape[0]
-        num_target_channels = 4 if self.transparent else 3
-
-        if channels == num_target_channels:
-            return tensor
-
-        alpha = None
-        if channels == 1:
-            color = tensor.expand(3, -1, -1)
-        elif channels == 2:
-            color = tensor[:1].expand(3, -1, -1)
-            alpha = tensor[1:]
-        else:
-            raise Exception(f'image with invalid number of channels given {channels}')
-
-        if not exists(alpha) and self.transparent:
-            alpha = torch.ones(1, *tensor.shape[1:], device=tensor.device)
-
-        return color if not self.transparent else torch.cat((color, alpha))
-
-def resize_to_minimum_size(min_size, image):
-    if max(*image.size) < min_size:
-        return torchvision.transforms.functional.resize(image, min_size)
-    return image
-
-class ImageDataset(Dataset):
-    def __init__(
-        self,
-        folder,
-        image_size,
-        transparent = False,
-        greyscale = False,
-        aug_prob = 0.
-    ):
-        super().__init__()
-        self.folder = folder
-        self.image_size = image_size
-        self.paths = [p for ext in EXTS for p in Path(f'{folder}').glob(f'**/*.{ext}')]
-        assert len(self.paths) > 0, f'No images were found in {folder} for training'
-
-        if transparent:
-            num_channels = 4
-            pillow_mode = 'RGBA'
-            expand_fn = expand_greyscale(transparent)
-        elif greyscale:
-            num_channels = 1
-            pillow_mode = 'L'
-            expand_fn = identity()
-        else:
-            num_channels = 3
-            pillow_mode = 'RGB'
-            expand_fn = expand_greyscale(transparent)
-
-        convert_image_fn = partial(convert_image_to, pillow_mode)
-
-        self.transform = transforms.Compose([
-            transforms.Lambda(convert_image_fn),
-            transforms.Lambda(partial(resize_to_minimum_size, image_size)),
-            transforms.Resize(image_size),
-            RandomApply(aug_prob, transforms.RandomResizedCrop(image_size, scale=(0.5, 1.0), ratio=(0.98, 1.02)), transforms.CenterCrop(image_size)),
-            transforms.ToTensor(),
-            transforms.Lambda(expand_fn)
-        ])
-
-    def __len__(self):
-        return len(self.paths)
-
-    def __getitem__(self, index):
-        path = self.paths[index]
-        img = Image.open(path)
-        return self.transform(img)
 
 # augmentations
 
@@ -378,8 +302,7 @@ class Generator(nn.Module):
         latent_dim = 256,
         fmap_max = 512,
         fmap_inverse_coef = 12,
-        transparent = False,
-        greyscale = False,
+        num_chans=3,
         attn_res_layers = [],
         freq_chan_attn = False
     ):
@@ -387,12 +310,8 @@ class Generator(nn.Module):
         resolution = log2(image_size)
         assert is_power_of_two(image_size), 'image size must be a power of 2'
 
-        if transparent:
-            init_channel = 4
-        elif greyscale:
-            init_channel = 1
-        else:
-            init_channel = 3
+        
+        init_channel = num_chans
 
         fmap_max = default(fmap_max, latent_dim)
 
@@ -520,8 +439,7 @@ class Discriminator(nn.Module):
         image_size,
         fmap_max = 512,
         fmap_inverse_coef = 12,
-        transparent = False,
-        greyscale = False,
+        num_chans=3,
         disc_output_size = 5,
         attn_res_layers = []
     ):
@@ -532,12 +450,7 @@ class Discriminator(nn.Module):
 
         resolution = int(resolution)
 
-        if transparent:
-            init_channel = 4
-        elif greyscale:
-            init_channel = 1
-        else:
-            init_channel = 3
+        init_channel = num_chans
 
         num_non_residual_layers = max(0, int(resolution) - 8)
         num_residual_layers = 8 - 3
@@ -693,8 +606,7 @@ class LightweightGAN(nn.Module):
         optimizer = "adam",
         fmap_max = 512,
         fmap_inverse_coef = 12,
-        transparent = False,
-        greyscale = False,
+        num_chans=3,
         disc_output_size = 5,
         attn_res_layers = [],
         freq_chan_attn = False,
@@ -712,8 +624,7 @@ class LightweightGAN(nn.Module):
             latent_dim = latent_dim,
             fmap_max = fmap_max,
             fmap_inverse_coef = fmap_inverse_coef,
-            transparent = transparent,
-            greyscale = greyscale,
+            num_chans=num_chans,
             attn_res_layers = attn_res_layers,
             freq_chan_attn = freq_chan_attn
         )
@@ -724,8 +635,7 @@ class LightweightGAN(nn.Module):
             image_size = image_size,
             fmap_max = fmap_max,
             fmap_inverse_coef = fmap_inverse_coef,
-            transparent = transparent,
-            greyscale = greyscale,
+            num_chans=num_chans,
             attn_res_layers = attn_res_layers,
             disc_output_size = disc_output_size
         )
@@ -787,8 +697,7 @@ class Trainer():
         image_size = 128,
         num_image_tiles = 8,
         fmap_max = 512,
-        transparent = False,
-        greyscale = False,
+        num_chans=3,
         batch_size = 4,
         gp_weight = 10,
         gradient_accumulate_every = 1,
@@ -836,10 +745,8 @@ class Trainer():
 
         self.latent_dim = latent_dim
         self.fmap_max = fmap_max
-        self.transparent = transparent
-        self.greyscale = greyscale
+        self.num_chans = num_chans
 
-        assert (int(self.transparent) + int(self.greyscale)) < 2, 'you can only set either transparency or greyscale'
 
         self.aug_prob = aug_prob
         self.aug_types = aug_types
@@ -894,7 +801,7 @@ class Trainer():
 
     @property
     def image_extension(self):
-        return 'jpg' if not self.transparent else 'png'
+        return 'jpg' 
 
     @property
     def checkpoint_num(self):
@@ -902,7 +809,6 @@ class Trainer():
         
     def init_GAN(self):
         args, kwargs = self.GAN_params
-        kwargs.pop("num_chans")
         
         # set some global variables before instantiating GAN
 
@@ -933,8 +839,6 @@ class Trainer():
             ttur_mult = self.ttur_mult,
             fmap_max = self.fmap_max,
             disc_output_size = self.disc_output_size,
-            transparent = self.transparent,
-            greyscale = self.greyscale,
             rank = self.rank,
             *args,
             **kwargs
@@ -953,10 +857,9 @@ class Trainer():
     def load_config(self):
         config = self.config() if not self.config_path.exists() else json.loads(self.config_path.read_text())
         self.image_size = config['image_size']
-        self.transparent = config['transparent']
         self.syncbatchnorm = config['syncbatchnorm']
         self.disc_output_size = config['disc_output_size']
-        self.greyscale = config.pop('greyscale', False)
+        self.num_chans = config.pop('num_chans', False)
         self.attn_res_layers = config.pop('attn_res_layers', [])
         self.freq_chan_attn = config.pop('freq_chan_attn', False)
         self.optimizer = config.pop('optimizer', 'adam')
@@ -967,8 +870,7 @@ class Trainer():
     def config(self):
         return {
             'image_size': self.image_size,
-            'transparent': self.transparent,
-            'greyscale': self.greyscale,
+            'num_chans': self.num_chans,
             'syncbatchnorm': self.syncbatchnorm,
             'disc_output_size': self.disc_output_size,
             'optimizer': self.optimizer,
@@ -1309,11 +1211,7 @@ class Trainer():
             generated_images = self.generate_(self.GAN.GE, interp_latents)
             images_grid = torchvision.utils.make_grid(generated_images, nrow = num_rows)
             pil_image = transforms.ToPILImage()(images_grid.cpu())
-            
-            if self.transparent:
-                background = Image.new('RGBA', pil_image.size, (255, 255, 255))
-                pil_image = Image.alpha_composite(background, pil_image)
-                
+                            
             frames.append(pil_image)
 
         frames[0].save(str(self.results_dir / self.name / f'{str(num)}.gif'), save_all=True, append_images=frames[1:], duration=80, loop=0, optimize=True)
