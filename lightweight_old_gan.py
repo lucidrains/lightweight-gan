@@ -716,11 +716,8 @@ class Trainer():
         calculate_fid_every = None,
         calculate_fid_num_images = 12800,
         clear_fid_cache = False,
-        is_ddp = False,
         rank = 0,
         world_size = 1,
-        log = False,
-        amp = False,
         *args,
         **kwargs
     ):
@@ -788,16 +785,13 @@ class Trainer():
         self.calculate_fid_num_images = calculate_fid_num_images
         self.clear_fid_cache = clear_fid_cache
 
-        self.is_ddp = is_ddp
         self.is_main = rank == 0
         self.rank = rank
         self.world_size = world_size
 
-        self.syncbatchnorm = is_ddp
 
-        self.amp = amp
-        self.G_scaler = GradScaler(enabled = self.amp)
-        self.D_scaler = GradScaler(enabled = self.amp)
+        self.G_scaler = GradScaler(enabled = False)
+        self.D_scaler = GradScaler(enabled = False)
 
     @property
     def image_extension(self):
@@ -815,17 +809,11 @@ class Trainer():
         global norm_class
         global Blur
 
-        norm_class = nn.SyncBatchNorm if self.syncbatchnorm else nn.BatchNorm2d
+        norm_class = nn.BatchNorm2d
         Blur = nn.Identity if not self.antialias else Blur
 
         # handle bugs when
         # switching from multi-gpu back to single gpu
-
-        if self.syncbatchnorm and not self.is_ddp:
-            import torch.distributed as dist
-            os.environ['MASTER_ADDR'] = 'localhost'
-            os.environ['MASTER_PORT'] = '12355'
-            dist.init_process_group('nccl', rank=0, world_size=1)
 
         # instantiate GAN
 
@@ -844,20 +832,12 @@ class Trainer():
             **kwargs
         )
 
-        if self.is_ddp:
-            ddp_kwargs = {'device_ids': [self.rank], 'output_device': self.rank, 'find_unused_parameters': True}
-
-            self.G_ddp = DDP(self.GAN.G, **ddp_kwargs)
-            self.D_ddp = DDP(self.GAN.D, **ddp_kwargs)
-            self.D_aug_ddp = DDP(self.GAN.D_aug, **ddp_kwargs)
-
     def write_config(self):
         self.config_path.write_text(json.dumps(self.config()))
 
     def load_config(self):
         config = self.config() if not self.config_path.exists() else json.loads(self.config_path.read_text())
         self.image_size = config['image_size']
-        self.syncbatchnorm = config['syncbatchnorm']
         self.disc_output_size = config['disc_output_size']
         self.num_chans = config.pop('num_chans', False)
         self.attn_res_layers = config.pop('attn_res_layers', [])
@@ -871,7 +851,6 @@ class Trainer():
         return {
             'image_size': self.image_size,
             'num_chans': self.num_chans,
-            'syncbatchnorm': self.syncbatchnorm,
             'disc_output_size': self.disc_output_size,
             'optimizer': self.optimizer,
             'attn_res_layers': self.attn_res_layers,
@@ -881,8 +860,7 @@ class Trainer():
     def set_data_src(self, folder):
         num_workers = default(self.num_workers, math.ceil(NUM_CORES / self.world_size))
         self.dataset = ImageDataset(folder, self.image_size, transparent = self.transparent, greyscale = self.greyscale, aug_prob = self.dataset_aug_prob)
-        sampler = DistributedSampler(self.dataset, rank=self.rank, num_replicas=self.world_size, shuffle=True) if self.is_ddp else None
-        dataloader = DataLoader(self.dataset, num_workers = num_workers, batch_size = math.ceil(self.batch_size / self.world_size), sampler = sampler, shuffle = not self.is_ddp, drop_last = True, pin_memory = True)
+        dataloader = DataLoader(self.dataset, num_workers = num_workers, batch_size = math.ceil(self.batch_size / self.world_size), drop_last = True, pin_memory = True)
         self.loader = cycle(dataloader)
 
         # auto set augmentation prob for user if dataset is detected to be low
@@ -918,19 +896,19 @@ class Trainer():
         aug_types  = self.aug_types
         aug_kwargs = {'prob': aug_prob, 'types': aug_types}
 
-        G = self.GAN.G if not self.is_ddp else self.G_ddp
-        D = self.GAN.D if not self.is_ddp else self.D_ddp
-        D_aug = self.GAN.D_aug if not self.is_ddp else self.D_aug_ddp
-
+        G = self.GAN.G 
+        D = self.GAN.D 
+        D_aug = self.GAN.D_aug 
+        
         apply_gradient_penalty = self.steps % 4 == 0
 
         # amp related contexts and functions
 
-        amp_context = autocast if self.amp else null_context
+        amp_context = null_context
 
         # train discriminator
         self.GAN.D_opt.zero_grad()
-        for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[D_aug, G]):
+        for i in gradient_accumulate_contexts(self.gradient_accumulate_every, False, ddps=[D_aug, G]):
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
             image_batch = next(self.loader).cuda(self.rank)
             image_batch.requires_grad_()
@@ -955,13 +933,12 @@ class Trainer():
 
             if apply_gradient_penalty:
                 outputs = [real_output, real_output_32x32]
-                outputs = list(map(self.D_scaler.scale, outputs)) if self.amp else outputs
 
                 scaled_gradients = torch_grad(outputs=outputs, inputs=image_batch,
                                        grad_outputs=list(map(lambda t: torch.ones(t.size(), device = image_batch.device), outputs)),
                                        create_graph=True, retain_graph=True, only_inputs=True)[0]
 
-                inv_scale = safe_div(1., self.D_scaler.get_scale()) if self.amp else 1.
+                inv_scale = 1.
 
                 if inv_scale != float('inf'):
                     gradients = scaled_gradients * inv_scale
@@ -989,8 +966,7 @@ class Trainer():
         # train generator
 
         self.GAN.G_opt.zero_grad()
-
-        for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[G, D_aug]):
+        for i in gradient_accumulate_contexts(self.gradient_accumulate_every, False, ddps=[D_aug, G]):
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
 
             with amp_context():

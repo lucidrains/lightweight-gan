@@ -789,10 +789,6 @@ class Trainer():
         self.rank = rank
         self.world_size = world_size
 
-
-        self.G_scaler = GradScaler(enabled = False)
-        self.D_scaler = GradScaler(enabled = False)
-
     @property
     def image_extension(self):
         return 'jpg' 
@@ -904,7 +900,6 @@ class Trainer():
 
         # amp related contexts and functions
 
-        amp_context = null_context
 
         # train discriminator
         self.GAN.D_opt.zero_grad()
@@ -913,23 +908,22 @@ class Trainer():
             image_batch = next(self.loader).cuda(self.rank)
             image_batch.requires_grad_()
 
-            with amp_context():
-                with torch.no_grad():
-                    generated_images = G(latents)
+            with torch.no_grad():
+                generated_images = G(latents)
 
-                fake_output, fake_output_32x32, _ = D_aug(generated_images, detach = True, **aug_kwargs)
+            fake_output, fake_output_32x32, _ = D_aug(generated_images, detach = True, **aug_kwargs)
 
-                real_output, real_output_32x32, real_aux_loss = D_aug(image_batch,  calc_aux_loss = True, **aug_kwargs)
+            real_output, real_output_32x32, real_aux_loss = D_aug(image_batch,  calc_aux_loss = True, **aug_kwargs)
 
-                real_output_loss = real_output
-                fake_output_loss = fake_output
+            real_output_loss = real_output
+            fake_output_loss = fake_output
 
-                divergence = hinge_loss(real_output_loss, fake_output_loss)
-                divergence_32x32 = hinge_loss(real_output_32x32, fake_output_32x32)
-                disc_loss = divergence + divergence_32x32
+            divergence = hinge_loss(real_output_loss, fake_output_loss)
+            divergence_32x32 = hinge_loss(real_output_32x32, fake_output_32x32)
+            disc_loss = divergence + divergence_32x32
 
-                aux_loss = real_aux_loss
-                disc_loss = disc_loss + aux_loss
+            aux_loss = real_aux_loss
+            disc_loss = disc_loss + aux_loss
 
             if apply_gradient_penalty:
                 outputs = [real_output, real_output_32x32]
@@ -943,25 +937,22 @@ class Trainer():
                 if inv_scale != float('inf'):
                     gradients = scaled_gradients * inv_scale
 
-                    with amp_context():
-                        gradients = gradients.reshape(batch_size, -1)
-                        gp =  self.gp_weight * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
+                    gradients = gradients.reshape(batch_size, -1)
+                    gp =  self.gp_weight * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
 
-                        if not torch.isnan(gp):
-                            disc_loss = disc_loss + gp
-                            self.last_gp_loss = gp.clone().detach().item()
+                    if not torch.isnan(gp):
+                        disc_loss = disc_loss + gp
+                        self.last_gp_loss = gp.clone().detach().item()
 
-            with amp_context():
-                disc_loss = disc_loss / self.gradient_accumulate_every
+            disc_loss = disc_loss / self.gradient_accumulate_every
 
             disc_loss.register_hook(raise_if_nan)
-            self.D_scaler.scale(disc_loss).backward()
+            disc_loss.backward()
             total_disc_loss += divergence
 
         self.last_recon_loss = aux_loss.item()
         self.d_loss = float(total_disc_loss.item() / self.gradient_accumulate_every)
-        self.D_scaler.step(self.GAN.D_opt)
-        self.D_scaler.update()
+        self.GAN.D_opt.step()
 
         # train generator
 
@@ -969,30 +960,28 @@ class Trainer():
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, False, ddps=[D_aug, G]):
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
 
-            with amp_context():
-                generated_images = G(latents)
-                fake_output, fake_output_32x32, _ = D_aug(generated_images, **aug_kwargs)
-                fake_output_loss = fake_output.mean(dim = 1) + fake_output_32x32.mean(dim = 1)
+            generated_images = G(latents)
+            fake_output, fake_output_32x32, _ = D_aug(generated_images, **aug_kwargs)
+            fake_output_loss = fake_output.mean(dim = 1) + fake_output_32x32.mean(dim = 1)
 
-                epochs = (self.steps * batch_size * self.gradient_accumulate_every) / len(self.dataset)
-                k_frac = max(self.generator_top_k_gamma ** epochs, self.generator_top_k_frac)
-                k = math.ceil(batch_size * k_frac)
+            epochs = (self.steps * batch_size * self.gradient_accumulate_every) / len(self.dataset)
+            k_frac = max(self.generator_top_k_gamma ** epochs, self.generator_top_k_frac)
+            k = math.ceil(batch_size * k_frac)
 
-                if k != batch_size:
-                    fake_output_loss, _ = fake_output_loss.topk(k=k, largest=False)
+            if k != batch_size:
+                fake_output_loss, _ = fake_output_loss.topk(k=k, largest=False)
 
-                loss = fake_output_loss.mean()
-                gen_loss = loss
+            loss = fake_output_loss.mean()
+            gen_loss = loss
 
-                gen_loss = gen_loss / self.gradient_accumulate_every
+            gen_loss = gen_loss / self.gradient_accumulate_every
 
             gen_loss.register_hook(raise_if_nan)
-            self.G_scaler.scale(gen_loss).backward()
+            gen_loss.backward()
             total_gen_loss += loss 
 
         self.g_loss = float(total_gen_loss.item() / self.gradient_accumulate_every)
-        self.G_scaler.step(self.GAN.G_opt)
-        self.G_scaler.update()
+        self.GAN.G_opt.step()
 
         # calculate moving averages
 
@@ -1229,8 +1218,6 @@ class Trainer():
         save_data = {
             'GAN': self.GAN.state_dict(),
             'version': __version__,
-            'G_scaler': self.G_scaler.state_dict(),
-            'D_scaler': self.D_scaler.state_dict()
         }
 
         torch.save(save_data, self.model_name(num))
@@ -1261,11 +1248,6 @@ class Trainer():
         except Exception as e:
             print('unable to load save model. please try downgrading the package to the version specified by the saved model')
             raise e
-
-        if 'G_scaler' in load_data:
-            self.G_scaler.load_state_dict(load_data['G_scaler'])
-        if 'D_scaler' in load_data:
-            self.D_scaler.load_state_dict(load_data['D_scaler'])
 
     def get_checkpoints(self):
         file_paths = [p for p in Path(self.models_dir / self.name).glob('model_*.pt')]
