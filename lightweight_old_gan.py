@@ -210,6 +210,7 @@ class AugWrapper(nn.Module):
 
 # modifiable global variables
 
+# TODO: KOKO
 norm_class = nn.BatchNorm2d
 
 def upsample(scale_factor = 2):
@@ -713,9 +714,6 @@ class Trainer():
         aug_prob = None,
         aug_types = ['translation', 'cutout'],
         dataset_aug_prob = 0.,
-        calculate_fid_every = None,
-        calculate_fid_num_images = 12800,
-        clear_fid_cache = False,
         rank = 0,
         world_size = 1,
         *args,
@@ -730,7 +728,6 @@ class Trainer():
         self.base_dir = base_dir
         self.results_dir = base_dir / results_dir
         self.models_dir = base_dir / models_dir
-        self.fid_dir = base_dir / 'fid' / name
 
         self.config_path = self.models_dir / name / '.config.json'
 
@@ -774,24 +771,16 @@ class Trainer():
         self.g_loss = 0
         self.last_gp_loss = None
         self.last_recon_loss = None
-        self.last_fid = None
 
         self.init_folders()
 
         self.loader = None
         self.dataset_aug_prob = dataset_aug_prob
 
-        self.calculate_fid_every = calculate_fid_every
-        self.calculate_fid_num_images = calculate_fid_num_images
-        self.clear_fid_cache = clear_fid_cache
 
         self.is_main = rank == 0
         self.rank = rank
         self.world_size = world_size
-
-
-        self.G_scaler = GradScaler(enabled = False)
-        self.D_scaler = GradScaler(enabled = False)
 
     @property
     def image_extension(self):
@@ -808,7 +797,8 @@ class Trainer():
 
         global norm_class
         global Blur
-
+        
+        # TODO: KOKO
         norm_class = nn.BatchNorm2d
         Blur = nn.Identity if not self.antialias else Blur
 
@@ -904,7 +894,6 @@ class Trainer():
 
         # amp related contexts and functions
 
-        amp_context = null_context
 
         # train discriminator
         self.GAN.D_opt.zero_grad()
@@ -913,23 +902,22 @@ class Trainer():
             image_batch = next(self.loader).cuda(self.rank)
             image_batch.requires_grad_()
 
-            with amp_context():
-                with torch.no_grad():
-                    generated_images = G(latents)
+            with torch.no_grad():
+                generated_images = G(latents)
 
-                fake_output, fake_output_32x32, _ = D_aug(generated_images, detach = True, **aug_kwargs)
+            fake_output, fake_output_32x32, _ = D_aug(generated_images, detach = True, **aug_kwargs)
 
-                real_output, real_output_32x32, real_aux_loss = D_aug(image_batch,  calc_aux_loss = True, **aug_kwargs)
+            real_output, real_output_32x32, real_aux_loss = D_aug(image_batch,  calc_aux_loss = True, **aug_kwargs)
 
-                real_output_loss = real_output
-                fake_output_loss = fake_output
+            real_output_loss = real_output
+            fake_output_loss = fake_output
 
-                divergence = hinge_loss(real_output_loss, fake_output_loss)
-                divergence_32x32 = hinge_loss(real_output_32x32, fake_output_32x32)
-                disc_loss = divergence + divergence_32x32
+            divergence = hinge_loss(real_output_loss, fake_output_loss)
+            divergence_32x32 = hinge_loss(real_output_32x32, fake_output_32x32)
+            disc_loss = divergence + divergence_32x32
 
-                aux_loss = real_aux_loss
-                disc_loss = disc_loss + aux_loss
+            aux_loss = real_aux_loss
+            disc_loss = disc_loss + aux_loss
 
             if apply_gradient_penalty:
                 outputs = [real_output, real_output_32x32]
@@ -943,25 +931,22 @@ class Trainer():
                 if inv_scale != float('inf'):
                     gradients = scaled_gradients * inv_scale
 
-                    with amp_context():
-                        gradients = gradients.reshape(batch_size, -1)
-                        gp =  self.gp_weight * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
+                    gradients = gradients.reshape(batch_size, -1)
+                    gp =  self.gp_weight * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
 
-                        if not torch.isnan(gp):
-                            disc_loss = disc_loss + gp
-                            self.last_gp_loss = gp.clone().detach().item()
+                    if not torch.isnan(gp):
+                        disc_loss = disc_loss + gp
+                        self.last_gp_loss = gp.clone().detach().item()
 
-            with amp_context():
-                disc_loss = disc_loss / self.gradient_accumulate_every
+            disc_loss = disc_loss / self.gradient_accumulate_every
 
             disc_loss.register_hook(raise_if_nan)
-            self.D_scaler.scale(disc_loss).backward()
+            disc_loss.backward()
             total_disc_loss += divergence
 
         self.last_recon_loss = aux_loss.item()
         self.d_loss = float(total_disc_loss.item() / self.gradient_accumulate_every)
-        self.D_scaler.step(self.GAN.D_opt)
-        self.D_scaler.update()
+        self.GAN.D_opt.step()
 
         # train generator
 
@@ -969,30 +954,28 @@ class Trainer():
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, False, ddps=[D_aug, G]):
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
 
-            with amp_context():
-                generated_images = G(latents)
-                fake_output, fake_output_32x32, _ = D_aug(generated_images, **aug_kwargs)
-                fake_output_loss = fake_output.mean(dim = 1) + fake_output_32x32.mean(dim = 1)
+            generated_images = G(latents)
+            fake_output, fake_output_32x32, _ = D_aug(generated_images, **aug_kwargs)
+            fake_output_loss = fake_output.mean(dim = 1) + fake_output_32x32.mean(dim = 1)
 
-                epochs = (self.steps * batch_size * self.gradient_accumulate_every) / len(self.dataset)
-                k_frac = max(self.generator_top_k_gamma ** epochs, self.generator_top_k_frac)
-                k = math.ceil(batch_size * k_frac)
+            epochs = (self.steps * batch_size * self.gradient_accumulate_every) / len(self.dataset)
+            k_frac = max(self.generator_top_k_gamma ** epochs, self.generator_top_k_frac)
+            k = math.ceil(batch_size * k_frac)
 
-                if k != batch_size:
-                    fake_output_loss, _ = fake_output_loss.topk(k=k, largest=False)
+            if k != batch_size:
+                fake_output_loss, _ = fake_output_loss.topk(k=k, largest=False)
 
-                loss = fake_output_loss.mean()
-                gen_loss = loss
+            loss = fake_output_loss.mean()
+            gen_loss = loss
 
-                gen_loss = gen_loss / self.gradient_accumulate_every
+            gen_loss = gen_loss / self.gradient_accumulate_every
 
             gen_loss.register_hook(raise_if_nan)
-            self.G_scaler.scale(gen_loss).backward()
+            gen_loss.backward()
             total_gen_loss += loss 
 
         self.g_loss = float(total_gen_loss.item() / self.gradient_accumulate_every)
-        self.G_scaler.step(self.GAN.G_opt)
-        self.G_scaler.update()
+        self.GAN.G_opt.step()
 
         # calculate moving averages
 
@@ -1020,14 +1003,6 @@ class Trainer():
 
             if self.steps % self.evaluate_every == 0 or (self.steps % 100 == 0 and self.steps < 20000):
                 self.evaluate(floor(self.steps / self.evaluate_every), num_image_tiles = self.num_image_tiles)
-
-            if exists(self.calculate_fid_every) and self.steps % self.calculate_fid_every == 0 and self.steps != 0:
-                num_batches = math.ceil(self.calculate_fid_num_images / self.batch_size)
-                fid = self.calculate_fid(num_batches)
-                self.last_fid = fid
-
-                with open(str(self.results_dir / self.name / f'fid_scores.txt'), 'a') as f:
-                    f.write(f'{self.steps},{fid}\n')
 
         self.steps += 1
 
@@ -1118,49 +1093,6 @@ class Trainer():
                 torchvision.utils.save_image(generated_image, path, nrow=num_images)
 
     @torch.no_grad()
-    def calculate_fid(self, num_batches):
-        from pytorch_fid import fid_score
-        torch.cuda.empty_cache()
-
-        real_path = self.fid_dir / 'real'
-        fake_path = self.fid_dir / 'fake'
-
-        # remove any existing files used for fid calculation and recreate directories
-        if not real_path.exists() or self.clear_fid_cache:
-            rmtree(real_path, ignore_errors=True)
-            os.makedirs(real_path)
-
-            for batch_num in tqdm(range(num_batches), desc='calculating FID - saving reals'):
-                real_batch = next(self.loader)
-                for k, image in enumerate(real_batch.unbind(0)):
-                    ind = k + batch_num * self.batch_size
-                    torchvision.utils.save_image(image, real_path / f'{ind}.png')
-
-        # generate a bunch of fake images in results / name / fid_fake
-
-        rmtree(fake_path, ignore_errors=True)
-        os.makedirs(fake_path)
-
-        self.GAN.eval()
-        ext = self.image_extension
-
-        latent_dim = self.GAN.latent_dim
-        image_size = self.GAN.image_size
-
-        for batch_num in tqdm(range(num_batches), desc='calculating FID - saving generated'):
-            # latents and noise
-            latents = torch.randn(self.batch_size, latent_dim).cuda(self.rank)
-
-            # moving averages
-            generated_images = self.generate_(self.GAN.GE, latents)
-
-            for j, image in enumerate(generated_images.unbind(0)):
-                ind = j + batch_num * self.batch_size
-                torchvision.utils.save_image(image, str(fake_path / f'{str(ind)}-ema.{ext}'))
-
-        return fid_score.calculate_fid_given_paths([str(real_path), str(fake_path)], 256, latents.device, 2048)
-
-    @torch.no_grad()
     def generate_(self, G, style, num_image_tiles = 8):
         generated_images = evaluate_in_chunks(self.batch_size, G, style)
         return generated_images.clamp_(0., 1.)
@@ -1204,7 +1136,6 @@ class Trainer():
             ('D', self.d_loss),
             ('GP', self.last_gp_loss),
             ('SS', self.last_recon_loss),
-            ('FID', self.last_fid)
         ]
 
         data = [d for d in data if exists(d[1])]
@@ -1221,7 +1152,6 @@ class Trainer():
     def clear(self):
         rmtree(str(self.models_dir / self.name), True)
         rmtree(str(self.results_dir / self.name), True)
-        rmtree(str(self.fid_dir), True)
         rmtree(str(self.config_path), True)
         self.init_folders()
 
@@ -1229,8 +1159,6 @@ class Trainer():
         save_data = {
             'GAN': self.GAN.state_dict(),
             'version': __version__,
-            'G_scaler': self.G_scaler.state_dict(),
-            'D_scaler': self.D_scaler.state_dict()
         }
 
         torch.save(save_data, self.model_name(num))
@@ -1261,11 +1189,6 @@ class Trainer():
         except Exception as e:
             print('unable to load save model. please try downgrading the package to the version specified by the saved model')
             raise e
-
-        if 'G_scaler' in load_data:
-            self.G_scaler.load_state_dict(load_data['G_scaler'])
-        if 'D_scaler' in load_data:
-            self.D_scaler.load_state_dict(load_data['D_scaler'])
 
     def get_checkpoints(self):
         file_paths = [p for p in Path(self.models_dir / self.name).glob('model_*.pt')]
