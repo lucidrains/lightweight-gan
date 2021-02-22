@@ -998,7 +998,7 @@ class Trainer():
                         disc_loss = disc_loss + gp
                         self.last_gp_loss = gp.clone().detach().item()
 
-            disc_loss = disc_loss / self.gradient_accumulate_every)
+            disc_loss = disc_loss / self.gradient_accumulate_every
 
             disc_loss.register_hook(raise_if_nan)
             disc_loss.backward()
@@ -1041,7 +1041,7 @@ class Trainer():
             total_gen_loss += loss
 
         self.g_loss = float(total_gen_loss.item() /
-                            self.gradient_accumulate_every
+                            self.gradient_accumulate_every)
         self.GAN.G_opt.step()
 
         # calculate moving averages
