@@ -210,6 +210,7 @@ class AugWrapper(nn.Module):
 
 # modifiable global variables
 
+# TODO: KOKO
 norm_class = nn.BatchNorm2d
 
 def upsample(scale_factor = 2):
@@ -713,9 +714,6 @@ class Trainer():
         aug_prob = None,
         aug_types = ['translation', 'cutout'],
         dataset_aug_prob = 0.,
-        calculate_fid_every = None,
-        calculate_fid_num_images = 12800,
-        clear_fid_cache = False,
         rank = 0,
         world_size = 1,
         *args,
@@ -730,7 +728,6 @@ class Trainer():
         self.base_dir = base_dir
         self.results_dir = base_dir / results_dir
         self.models_dir = base_dir / models_dir
-        self.fid_dir = base_dir / 'fid' / name
 
         self.config_path = self.models_dir / name / '.config.json'
 
@@ -774,16 +771,12 @@ class Trainer():
         self.g_loss = 0
         self.last_gp_loss = None
         self.last_recon_loss = None
-        self.last_fid = None
 
         self.init_folders()
 
         self.loader = None
         self.dataset_aug_prob = dataset_aug_prob
 
-        self.calculate_fid_every = calculate_fid_every
-        self.calculate_fid_num_images = calculate_fid_num_images
-        self.clear_fid_cache = clear_fid_cache
 
         self.is_main = rank == 0
         self.rank = rank
@@ -804,7 +797,8 @@ class Trainer():
 
         global norm_class
         global Blur
-
+        
+        # TODO: KOKO
         norm_class = nn.BatchNorm2d
         Blur = nn.Identity if not self.antialias else Blur
 
@@ -1010,14 +1004,6 @@ class Trainer():
             if self.steps % self.evaluate_every == 0 or (self.steps % 100 == 0 and self.steps < 20000):
                 self.evaluate(floor(self.steps / self.evaluate_every), num_image_tiles = self.num_image_tiles)
 
-            if exists(self.calculate_fid_every) and self.steps % self.calculate_fid_every == 0 and self.steps != 0:
-                num_batches = math.ceil(self.calculate_fid_num_images / self.batch_size)
-                fid = self.calculate_fid(num_batches)
-                self.last_fid = fid
-
-                with open(str(self.results_dir / self.name / f'fid_scores.txt'), 'a') as f:
-                    f.write(f'{self.steps},{fid}\n')
-
         self.steps += 1
 
     @torch.no_grad()
@@ -1107,49 +1093,6 @@ class Trainer():
                 torchvision.utils.save_image(generated_image, path, nrow=num_images)
 
     @torch.no_grad()
-    def calculate_fid(self, num_batches):
-        from pytorch_fid import fid_score
-        torch.cuda.empty_cache()
-
-        real_path = self.fid_dir / 'real'
-        fake_path = self.fid_dir / 'fake'
-
-        # remove any existing files used for fid calculation and recreate directories
-        if not real_path.exists() or self.clear_fid_cache:
-            rmtree(real_path, ignore_errors=True)
-            os.makedirs(real_path)
-
-            for batch_num in tqdm(range(num_batches), desc='calculating FID - saving reals'):
-                real_batch = next(self.loader)
-                for k, image in enumerate(real_batch.unbind(0)):
-                    ind = k + batch_num * self.batch_size
-                    torchvision.utils.save_image(image, real_path / f'{ind}.png')
-
-        # generate a bunch of fake images in results / name / fid_fake
-
-        rmtree(fake_path, ignore_errors=True)
-        os.makedirs(fake_path)
-
-        self.GAN.eval()
-        ext = self.image_extension
-
-        latent_dim = self.GAN.latent_dim
-        image_size = self.GAN.image_size
-
-        for batch_num in tqdm(range(num_batches), desc='calculating FID - saving generated'):
-            # latents and noise
-            latents = torch.randn(self.batch_size, latent_dim).cuda(self.rank)
-
-            # moving averages
-            generated_images = self.generate_(self.GAN.GE, latents)
-
-            for j, image in enumerate(generated_images.unbind(0)):
-                ind = j + batch_num * self.batch_size
-                torchvision.utils.save_image(image, str(fake_path / f'{str(ind)}-ema.{ext}'))
-
-        return fid_score.calculate_fid_given_paths([str(real_path), str(fake_path)], 256, latents.device, 2048)
-
-    @torch.no_grad()
     def generate_(self, G, style, num_image_tiles = 8):
         generated_images = evaluate_in_chunks(self.batch_size, G, style)
         return generated_images.clamp_(0., 1.)
@@ -1193,7 +1136,6 @@ class Trainer():
             ('D', self.d_loss),
             ('GP', self.last_gp_loss),
             ('SS', self.last_recon_loss),
-            ('FID', self.last_fid)
         ]
 
         data = [d for d in data if exists(d[1])]
@@ -1210,7 +1152,6 @@ class Trainer():
     def clear(self):
         rmtree(str(self.models_dir / self.name), True)
         rmtree(str(self.results_dir / self.name), True)
-        rmtree(str(self.fid_dir), True)
         rmtree(str(self.config_path), True)
         self.init_folders()
 
