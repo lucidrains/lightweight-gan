@@ -960,10 +960,11 @@ class Trainer():
 
 
             fake_output, fake_output_32x32, _ = Y(latents, True, **aug_kwargs)
-            
+            print(fake_output.shape, fake_output_32x32.shape)
 
             real_output, real_output_32x32, real_aux_loss = D_aug(
                 image_batch,  calc_aux_loss=True, **aug_kwargs)
+            print(real_output.shape, real_output_32x32.shape)
 
             real_output_loss = real_output
             fake_output_loss = fake_output  # TODO: is this shape good?
