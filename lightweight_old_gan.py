@@ -24,8 +24,8 @@ import torchvision
 from torchvision import transforms
 from kornia import filter2D
 
-from lightweight_gan.diff_augment import DiffAugment
-from lightweight_gan.version import __version__
+from diff_augment import DiffAugment
+from version import __version__
 
 from tqdm import tqdm
 from einops import rearrange, reduce
