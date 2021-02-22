@@ -944,8 +944,8 @@ class Trainer():
 
         G = self.GAN.G
         D = self.GAN.D
-        D_aug = nn.DataParallel(self.GAN.D_aug)
-        Y = nn.DataParallel(self.GAN)
+        D_aug = nn.DataParallel(self.GAN.D_aug) if self.multi_gpu else self.GAN.D_aug
+        Y = nn.DataParallel(self.GAN) if self.multi_gpu else self.GAN
     
         apply_gradient_penalty = self.steps % 4 == 0
 
