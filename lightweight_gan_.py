@@ -738,13 +738,8 @@ class LightweightGAN(nn.Module):
     def reset_parameter_averaging(self):
         self.GE.load_state_dict(self.G.state_dict())
 
-    def forward(self, latents, detach_gen=True, **aug_kwargs):
-        context = torch.no_grad if detach_gen else null_context
-        with context():
-            generated_images = self.G(latents)
-
-        return self.D_aug(
-            generated_images, detach=detach_gen, **aug_kwargs)
+    def forward(self, x):
+        raise NotImplementedError
         
 
 # trainer
@@ -921,15 +916,14 @@ class Trainer():
         dataloader = DataLoader(self.dataset, num_workers=num_workers,
                                 batch_size=self.batch_size, drop_last=True, pin_memory=True)
         self.loader = cycle(dataloader)
-        
+                
     def parallel(self):
         self.parallel_D_aug = nn.DataParallel(self.GAN.D_aug) if self.multi_gpus else self.GAN.D_aug
-        self.parallel_GD = nn.DataParallel(self.GAN) if self.multi_gpus else self.GAN
-        
+        self.parallel_G = nn.DataParallel(self.GAN.G) if self.multi_gpus else self.GAN.G
+
 
     def train(self):
-        assert exists(
-            self.loader), 'You must first initialize the data source with `.set_data_src(<folder of images>)`'
+        assert exists(self.loader), 'You must first initialize the data source with `.set_data_src(<folder of images>)`'
         device = torch.device(f'cuda:{self.rank}')
 
         if not exists(self.GAN):
@@ -944,18 +938,18 @@ class Trainer():
         image_size = self.GAN.image_size
         latent_dim = self.GAN.latent_dim
 
-        aug_prob = default(self.aug_prob, 0)
-        aug_types = self.aug_types
+        aug_prob   = default(self.aug_prob, 0)
+        aug_types  = self.aug_types
         aug_kwargs = {'prob': aug_prob, 'types': aug_types}
 
-        G = self.GAN.G
-        D = self.GAN.D
-        D_aug = self.parallel_D_aug
-        Y = self.parallel_GD
-    
+        G = self.parallel_G
+        #D = self.GAN.D 
+        D_aug = self.parallel_D_aug 
+        
         apply_gradient_penalty = self.steps % 4 == 0
 
         # amp related contexts and functions
+
 
         # train discriminator
         self.GAN.D_opt.zero_grad()
@@ -964,17 +958,17 @@ class Trainer():
             image_batch = next(self.loader).cuda(self.rank)
             image_batch.requires_grad_()
 
+            with torch.no_grad():
+                generated_images = G(latents)
 
-            fake_output, fake_output_32x32, _ = Y(latents, True, **aug_kwargs)
-            fake_output = fake_output.mean(0); fake_output_32x32 = fake_output_32x32.mean(0)
-            
-            real_output, real_output_32x32, real_aux_loss = D_aug(
-                image_batch,  calc_aux_loss=True, **aug_kwargs)
-            real_output = real_output.mean(0); real_output_32x32 = real_output_32x32.mean(0); real_aux_loss = real_aux_loss.mean(0)
+            fake_output, fake_output_32x32, _ = D_aug(generated_images, detach = True, **aug_kwargs)
+            if self.multi_gpus: fake_output = fake_output.mean(0); fake_output_32x32 = fake_output_32x32.mean(0)
 
+            real_output, real_output_32x32, real_aux_loss = D_aug(image_batch,  calc_aux_loss = True, **aug_kwargs)
+            if self.multi_gpus: real_output = real_output.mean(0); real_output_32x32 = real_output_32x32.mean(0); real_aux_loss = real_aux_loss.mean(0)
 
             real_output_loss = real_output
-            fake_output_loss = fake_output  # TODO: is this shape good?
+            fake_output_loss = fake_output
 
             divergence = hinge_loss(real_output_loss, fake_output_loss)
             divergence_32x32 = hinge_loss(real_output_32x32, fake_output_32x32)
@@ -982,14 +976,13 @@ class Trainer():
 
             aux_loss = real_aux_loss
             disc_loss = disc_loss + aux_loss
-            
+
             if apply_gradient_penalty:
                 outputs = [real_output, real_output_32x32]
 
                 scaled_gradients = torch_grad(outputs=outputs, inputs=image_batch,
-                                              grad_outputs=list(map(lambda t: torch.ones(
-                                                  t.size(), device=image_batch.device), outputs)),
-                                              create_graph=True, retain_graph=True, only_inputs=True)[0]
+                                       grad_outputs=list(map(lambda t: torch.ones(t.size(), device = image_batch.device), outputs)),
+                                       create_graph=True, retain_graph=True, only_inputs=True)[0]
 
                 inv_scale = 1.
 
@@ -997,22 +990,20 @@ class Trainer():
                     gradients = scaled_gradients * inv_scale
 
                     gradients = gradients.reshape(batch_size, -1)
-                    gp = self.gp_weight * \
-                        ((gradients.norm(2, dim=1) - 1) ** 2).mean()
+                    gp =  self.gp_weight * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
 
                     if not torch.isnan(gp):
                         disc_loss = disc_loss + gp
                         self.last_gp_loss = gp.clone().detach().item()
 
             disc_loss = disc_loss / self.gradient_accumulate_every
-            
+
             disc_loss.register_hook(raise_if_nan)
             disc_loss.backward()
             total_disc_loss += divergence
 
         self.last_recon_loss = aux_loss.item()
-        self.d_loss = float(total_disc_loss.item() /
-                            self.gradient_accumulate_every)
+        self.d_loss = float(total_disc_loss.item() / self.gradient_accumulate_every)
         self.GAN.D_opt.step()
 
         # train generator
@@ -1021,14 +1012,14 @@ class Trainer():
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, False, ddps=[D_aug, G]):
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
 
-            fake_output, fake_output_32x32, _ = Y(latents, False, **aug_kwargs)
-
+            generated_images = G(latents)
+            fake_output, fake_output_32x32, _ = D_aug(generated_images, **aug_kwargs)
+            if self.multi_gpus: fake_output = fake_output.mean(0); fake_output_32x32 = fake_output_32x32.mean(0)
+            
             fake_output_loss = fake_output.mean(dim = 1) + fake_output_32x32.mean(dim = 1)
 
-            epochs = (self.steps * batch_size *
-                      self.gradient_accumulate_every) / len(self.dataset)
-            k_frac = max(self.generator_top_k_gamma **
-                         epochs, self.generator_top_k_frac)
+            epochs = (self.steps * batch_size * self.gradient_accumulate_every) / len(self.dataset)
+            k_frac = max(self.generator_top_k_gamma ** epochs, self.generator_top_k_frac)
             k = math.ceil(batch_size * k_frac)
 
             if k != batch_size:
@@ -1041,10 +1032,9 @@ class Trainer():
 
             gen_loss.register_hook(raise_if_nan)
             gen_loss.backward()
-            total_gen_loss += loss
+            total_gen_loss += loss 
 
-        self.g_loss = float(total_gen_loss.item() /
-                            self.gradient_accumulate_every)
+        self.g_loss = float(total_gen_loss.item() / self.gradient_accumulate_every)
         self.GAN.G_opt.step()
 
         # calculate moving averages
@@ -1058,8 +1048,7 @@ class Trainer():
         # save from NaN errors
 
         if any(torch.isnan(l) for l in (total_gen_loss, total_disc_loss)):
-            print(
-                f'NaN detected for generator or discriminator. Loading from checkpoint #{self.checkpoint_num}')
+            print(f'NaN detected for generator or discriminator. Loading from checkpoint #{self.checkpoint_num}')
             self.load(self.checkpoint_num)
             raise NanException
 
@@ -1073,8 +1062,7 @@ class Trainer():
                 self.save(self.checkpoint_num)
 
             if self.steps % self.evaluate_every == 0 or (self.steps % 100 == 0 and self.steps < 20000):
-                self.evaluate(floor(self.steps / self.evaluate_every),
-                              num_image_tiles=self.num_image_tiles)
+                self.evaluate(floor(self.steps / self.evaluate_every), num_image_tiles = self.num_image_tiles)
 
         self.steps += 1
 
