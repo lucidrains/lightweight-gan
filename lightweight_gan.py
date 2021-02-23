@@ -1096,7 +1096,7 @@ class Trainer():
 
         generated_images = self.generate_(self.GAN.G, latents)
         torchvision.utils.save_image(generated_images, str(
-            self.results_dir / self.name / f'{str(num)}.{ext}'), nrow=num_rows)
+            self.results_dir / self.name / f'{str(num)}.{ext}'), nrow=num_rows, padding=4, pad_value=1)
 
         # moving averages
 
