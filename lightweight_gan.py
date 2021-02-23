@@ -528,7 +528,7 @@ class Discriminator(nn.Module):
         self.residual_layers = nn.ModuleList([])
 
         for (res, ((_, chan_in), (_, chan_out))) in zip(non_residual_resolutions, chan_in_out):
-            image_width = 2 ** resolution
+            image_width = 2 ** resolution  # res vs resolution
 
             attn = None
             if image_width in attn_res_layers:
