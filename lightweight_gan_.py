@@ -962,10 +962,10 @@ class Trainer():
                 generated_images = G(latents)
 
             fake_output, fake_output_32x32, _ = D_aug(generated_images, detach = True, **aug_kwargs)
-            #if self.multi_gpus: fake_output = fake_output.mean(0); fake_output_32x32 = fake_output_32x32.mean(0)
+            if self.multi_gpus: fake_output = fake_output.mean(0); fake_output_32x32 = fake_output_32x32.mean(0)
 
             real_output, real_output_32x32, real_aux_loss = D_aug(image_batch,  calc_aux_loss = True, **aug_kwargs)
-            #if self.multi_gpus: real_output = real_output.mean(0); real_output_32x32 = real_output_32x32.mean(0); real_aux_loss = real_aux_loss.mean(0)
+            if self.multi_gpus: real_output = real_output.mean(0); real_output_32x32 = real_output_32x32.mean(0); real_aux_loss = real_aux_loss.mean(0)
 
             real_output_loss = real_output
             fake_output_loss = fake_output
@@ -1014,7 +1014,7 @@ class Trainer():
 
             generated_images = G(latents)
             fake_output, fake_output_32x32, _ = D_aug(generated_images, **aug_kwargs)
-            #if self.multi_gpus: fake_output = fake_output.mean(0); fake_output_32x32 = fake_output_32x32.mean(0)
+            if self.multi_gpus: fake_output = fake_output.mean(0); fake_output_32x32 = fake_output_32x32.mean(0)
             
             fake_output_loss = fake_output.mean(dim = 1) + fake_output_32x32.mean(dim = 1)
 
