@@ -888,6 +888,7 @@ class Trainer():
             *args,
             **kwargs
         )
+        self.parallel()
 
     def write_config(self):
         self.config_path.write_text(json.dumps(self.config()))
