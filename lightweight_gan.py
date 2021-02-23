@@ -1102,7 +1102,8 @@ class Trainer():
 
         generated_images = self.generate_(self.GAN.GE, latents)
         torchvision.utils.save_image(generated_images, str(
-            self.results_dir / self.name / f'{str(num)}-ema.{ext}'), nrow=num_rows)
+            self.results_dir / self.name / f'{str(num)}-ema.{ext}'), nrow=num_rows, padding=4, pad_value=1)
+
 
     @torch.no_grad()
     def generate(self, num=0, num_image_tiles=4, checkpoint=None, types=['default', 'ema']):
