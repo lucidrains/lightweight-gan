@@ -964,7 +964,7 @@ class Trainer():
             
             real_output, real_output_32x32, real_aux_loss = D_aug(
                 image_batch,  calc_aux_loss=True, **aug_kwargs)
-            real_output = real_output.mean(0); real_output_32x32 = real_output_32x32.mean(0)
+            real_output = real_output.mean(0); real_output_32x32 = real_output_32x32.mean(0); real_aux_loss = real_aux_loss.mean(0)
 
 
             real_output_loss = real_output
@@ -974,14 +974,9 @@ class Trainer():
             divergence_32x32 = hinge_loss(real_output_32x32, fake_output_32x32)
             disc_loss = divergence + divergence_32x32
 
-            print(disc_loss.shape)
-
             aux_loss = real_aux_loss
             disc_loss = disc_loss + aux_loss
             
-            print(disc_loss.shape)
-
-
             if apply_gradient_penalty:
                 outputs = [real_output, real_output_32x32]
 
@@ -1004,9 +999,6 @@ class Trainer():
                         self.last_gp_loss = gp.clone().detach().item()
 
             disc_loss = disc_loss / self.gradient_accumulate_every
-
-            print(disc_loss.shape)
-            print()
             
             disc_loss.register_hook(raise_if_nan)
             disc_loss.backward()
