@@ -920,6 +920,12 @@ class Trainer():
         dataloader = DataLoader(self.dataset, num_workers=num_workers,
                                 batch_size=self.batch_size, drop_last=True, pin_memory=True)
         self.loader = cycle(dataloader)
+        
+    def parallel(self):
+        # TODO: yes should be deprec
+        self.parallel_D_aug = nn.DataParallel(self.GAN.D_aug) if self.multi_gpus else self.GAN.D_aug
+        self.parallel_GD = nn.DataParallel(self.GAN) if self.multi_gpus else self.GAN
+        
 
     def train(self):
         assert exists(
@@ -944,8 +950,8 @@ class Trainer():
 
         G = self.GAN.G
         D = self.GAN.D
-        D_aug = nn.DataParallel(self.GAN.D_aug) if self.multi_gpus else self.GAN.D_aug
-        Y = nn.DataParallel(self.GAN) if self.multi_gpus else self.GAN
+        D_aug = self.parallel_D_aug
+        Y = self.parallel_GD
     
         apply_gradient_penalty = self.steps % 4 == 0
 
