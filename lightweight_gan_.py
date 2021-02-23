@@ -1014,7 +1014,7 @@ class Trainer():
 
             generated_images = G(latents)
             fake_output, fake_output_32x32, _ = D_aug(generated_images, **aug_kwargs)
-            if self.multi_gpus: fake_output = fake_output.mean(0); fake_output_32x32 = fake_output_32x32.mean(0)
+            #if self.multi_gpus: fake_output = fake_output.mean(0); fake_output_32x32 = fake_output_32x32.mean(0)
             
             fake_output_loss = fake_output.mean(dim = 1) + fake_output_32x32.mean(dim = 1)
 
