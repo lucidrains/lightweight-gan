@@ -109,6 +109,9 @@ def evaluate_in_chunks(max_batch_size, model, *args):
     split_args = list(
         zip(*list(map(lambda x: x.split(max_batch_size, dim=0), args))))
     chunked_outputs = [model(*i) for i in split_args]
+    chunked_classes = [x[1] for x in chunked_outputs]  # TODO: return it?
+    chunked_outputs = [x[0] for x in chunked_outputs],
+    
     if len(chunked_outputs) == 1:
         return chunked_outputs[0]
     return torch.cat(chunked_outputs, dim=0)
