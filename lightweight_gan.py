@@ -335,7 +335,37 @@ class FCANet(nn.Module):
         return self.net(x)
 
 # generative adversarial network
+EMBEDDING_DIM = 16
 
+class InitConv(nn.Module):
+    def __init__(self, latent_dim, num_classes=0, embedding_dim=EMBEDDING_DIM):
+        super().__init__()
+        self.c1 = nn.Sequential(
+            nn.ConvTranspose2d(latent_dim, latent_dim * 2, 4),
+            norm_class(latent_dim * 2),
+            nn.GLU(dim=1)
+        )
+        self.num_classes = num_classes
+        if num_classes == 0:
+            return
+        self.embed = nn.Embedding(num_classes, embedding_dim)
+        self.c2 = nn.Sequential(
+            nn.Conv2d(latent_dim+embedding_dim, latent_dim*2, 1),
+            norm_class(latent_dim * 2),
+            nn.GLU(dim=1)
+        )        
+        
+    def forward(self, x, y=None):
+        left = self.c1(x)
+        if y is None:
+            if self.num_classes == 0:
+                return left
+            else:
+                y = torch.randint(self.num_classes, x.shape[:1])
+        assert self.num_classes == 0
+        right = self.embed(y)[:,:,None,None].repeat(1,1,4,4,)
+        return self.c2(torch.cat((left, right), 1))
+        
 
 class Generator(nn.Module):
     def __init__(
@@ -347,7 +377,8 @@ class Generator(nn.Module):
         fmap_inverse_coef=12,
         num_chans=3,
         attn_res_layers=[],
-        freq_chan_attn=False
+        freq_chan_attn=False,
+        num_classes=0,
     ):
         super().__init__()
         resolution = log2(image_size)
@@ -356,12 +387,10 @@ class Generator(nn.Module):
         init_channel = num_chans
 
         fmap_max = default(fmap_max, latent_dim)
+        
+        self.init_conv = InitConv(latent_dim, num_classes)
+            
 
-        self.initial_conv = nn.Sequential(
-            nn.ConvTranspose2d(latent_dim, latent_dim * 2, 4),
-            norm_class(latent_dim * 2),
-            nn.GLU(dim=1)
-        )
 
         num_layers = int(resolution) - 2
         features = list(
@@ -375,7 +404,7 @@ class Generator(nn.Module):
         self.res_layers = range(2, num_layers + 2)
         self.layers = nn.ModuleList([])
         self.res_to_feature_map = dict(zip(self.res_layers, in_out_features))
-
+    
         self.sle_map = ((3, 7), (4, 8), (5, 9), (6, 10))
         self.sle_map = list(
             filter(lambda t: t[0] <= resolution and t[1] <= resolution, self.sle_map))
@@ -422,9 +451,9 @@ class Generator(nn.Module):
 
         self.out_conv = nn.Conv2d(features[-1], init_channel, 3, padding=1)
 
-    def forward(self, x):
+    def forward(self, x, y=None):
         x = rearrange(x, 'b c -> b c () ()')
-        x = self.initial_conv(x)
+        x = self.initial_conv(x, y)
         x = F.normalize(x, dim=1)
 
         residuals = dict()
@@ -444,7 +473,7 @@ class Generator(nn.Module):
             if next_res in residuals:
                 x = x * residuals[next_res]
 
-        return self.out_conv(x)
+        return self.out_conv(x), y
 
 
 class SimpleDecoder(nn.Module):
@@ -980,7 +1009,7 @@ class Trainer():
         self.GAN.D_opt.zero_grad()
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, False, ddps=[D_aug, G]):
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
-            image_batch = next(self.loader).cuda(self.rank)
+            image_batch = next(self.loader).cuda(self.rank)  # TODO: get optional labels here
             image_batch.requires_grad_()
 
 
