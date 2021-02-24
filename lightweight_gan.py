@@ -1229,6 +1229,7 @@ class Trainer():
     @torch.no_grad()
     def generate_(self, G, style, num_image_tiles=8):
         generated_images = evaluate_in_chunks(self.batch_size, G, style)
+        print(generated_images)
         return generated_images.clamp_(0., 1.)
 
     @torch.no_grad()
