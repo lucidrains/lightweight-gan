@@ -1021,7 +1021,7 @@ class Trainer():
             if self.num_classes > 0:
                 assert type(image_batch) in {tuple, list}, "Conditional GAN got no labels provided"
                 image_batch, y = image_batch
-                y = y.cuda(self.runk)
+                y = y.cuda(self.rank)
             else:
                 y = None
             image_batch = image_batch.cuda(self.rank) 
