@@ -364,7 +364,7 @@ class InitConv(nn.Module):
                 return left
             else:
                 y = torch.randint(self.num_classes, x.shape[:1])
-        assert self.num_classes == 0
+        assert self.num_classes > 0
         right = self.embed(y)[:,:,None,None].repeat(1,1,4,4,)
         return self.c2(torch.cat((left, right), 1))
         
