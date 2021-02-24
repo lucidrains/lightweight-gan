@@ -659,6 +659,7 @@ class Discriminator(nn.Module):
         out = self.to_logits(x).flatten(1)
 
         if y is not None:
+            print(self.l_y(y).shape, x.shape)
             out += torch.sum(self.l_y(y) * x, dim=1, keepdim=True)
 
         img_32x32 = F.interpolate(orig_img, size=(32, 32))
