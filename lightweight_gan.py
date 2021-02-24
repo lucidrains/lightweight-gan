@@ -717,7 +717,8 @@ class LightweightGAN(nn.Module):
         ttur_mult=1.,
         lr=2e-4,
         rank=0,
-        ddp=False
+        ddp=False,
+        num_classes=0,
     ):
         super().__init__()
         self.latent_dim = latent_dim
@@ -730,7 +731,8 @@ class LightweightGAN(nn.Module):
             fmap_inverse_coef=fmap_inverse_coef,
             num_chans=num_chans,
             attn_res_layers=attn_res_layers,
-            freq_chan_attn=freq_chan_attn
+            freq_chan_attn=freq_chan_attn,
+            num_classes=num_classes,
         )
 
         self.G = Generator(**G_kwargs)
@@ -741,7 +743,8 @@ class LightweightGAN(nn.Module):
             fmap_inverse_coef=fmap_inverse_coef,
             num_chans=num_chans,
             attn_res_layers=attn_res_layers,
-            disc_output_size=disc_output_size
+            disc_output_size=disc_output_size,
+            num_classes=num_classes,
         )
 
         self.ema_updater = EMA(0.995)
@@ -832,6 +835,7 @@ class Trainer():
         rank=0,
         world_size=1,
         multi_gpus=False,
+        num_classes=0,
         *args,
         **kwargs
     ):
@@ -898,6 +902,7 @@ class Trainer():
         self.rank = rank
         self.world_size = world_size
         self.multi_gpus = multi_gpus
+        self.num_classes = num_classes
 
     @property
     def image_extension(self):
@@ -935,6 +940,7 @@ class Trainer():
             fmap_max=self.fmap_max,
             disc_output_size=self.disc_output_size,
             rank=self.rank,
+            num_classes=self.num_classes,
             *args,
             **kwargs
         )
@@ -1012,6 +1018,11 @@ class Trainer():
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, False, ddps=[D_aug, G]):
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
             image_batch = next(self.loader).cuda(self.rank)  # TODO: get optional labels here
+            if self.num_classes > 0:
+                assert type(image_batch) is tuple, "Conditional GAN got no labels provided"
+                image_batch, y = image_batch
+            else:
+                y = None
             image_batch.requires_grad_()
 
 
@@ -1019,7 +1030,7 @@ class Trainer():
             fake_output = fake_output.mean(0); fake_output_32x32 = fake_output_32x32.mean(0)
             
             real_output, real_output_32x32, real_aux_loss = D_aug(
-                image_batch,  calc_aux_loss=True, **aug_kwargs)  # TODO: pass y from data here
+                image_batch, y, calc_aux_loss=True, **aug_kwargs)  # TODO: pass y from data here
             real_output = real_output.mean(0); real_output_32x32 = real_output_32x32.mean(0); real_aux_loss = real_aux_loss.mean(0)
 
 
