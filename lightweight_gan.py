@@ -228,7 +228,7 @@ class AugWrapper(nn.Module):
         super().__init__()
         self.D = D
 
-    def forward(self, images, prob=0., types=[], detach=False, **kwargs):
+    def forward(self, images, y=None, prob=0., types=[], detach=False, **kwargs):
         context = torch.no_grad if detach else null_context
 
         with context():
@@ -236,12 +236,12 @@ class AugWrapper(nn.Module):
                 images = random_hflip(images, prob=0.5)
                 images = DiffAugment(images, types=types)
 
-        return self.D(images, **kwargs)
+        return self.D(images, y, **kwargs)
 
 # modifiable global variables
 
 
-# TODO: KOKO
+# TODO: make sure this is placeholder
 norm_class = nn.BatchNorm2d
 
 
@@ -789,10 +789,10 @@ class LightweightGAN(nn.Module):
     def forward(self, latents, detach_gen=True, **aug_kwargs):
         context = torch.no_grad if detach_gen else null_context
         with context():
-            generated_images = self.G(latents)
+            generated_images, y = self.G(latents)
 
         return self.D_aug(
-            generated_images, detach=detach_gen, **aug_kwargs)
+            generated_images, y, detach=detach_gen, **aug_kwargs)
         
 
 # trainer
@@ -1017,7 +1017,7 @@ class Trainer():
             fake_output = fake_output.mean(0); fake_output_32x32 = fake_output_32x32.mean(0)
             
             real_output, real_output_32x32, real_aux_loss = D_aug(
-                image_batch,  calc_aux_loss=True, **aug_kwargs)
+                image_batch,  calc_aux_loss=True, **aug_kwargs)  # TODO: pass y from data here
             real_output = real_output.mean(0); real_output_32x32 = real_output_32x32.mean(0); real_aux_loss = real_aux_loss.mean(0)
 
 
