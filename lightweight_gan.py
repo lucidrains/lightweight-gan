@@ -1017,10 +1017,11 @@ class Trainer():
         self.GAN.D_opt.zero_grad()
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, False, ddps=[D_aug, G]):
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
-            image_batch = next(self.loader)  # TODO: get optional labels here
+            image_batch = next(self.loader) 
             if self.num_classes > 0:
                 assert type(image_batch) in {tuple, list}, "Conditional GAN got no labels provided"
                 image_batch, y = image_batch
+                y = y.cuda(self.runk)
             else:
                 y = None
             image_batch = image_batch.cuda(self.rank) 
