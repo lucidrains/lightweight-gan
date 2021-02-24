@@ -110,8 +110,7 @@ def evaluate_in_chunks(max_batch_size, model, *args):
         zip(*list(map(lambda x: x.split(max_batch_size, dim=0), args))))
     chunked_outputs = [model(*i) for i in split_args]
     chunked_classes = [x[1] for x in chunked_outputs]  # TODO: return it?
-    chunked_outputs = [x[0] for x in chunked_outputs],
-    
+    chunked_outputs = [x[0] for x in chunked_outputs]
     if len(chunked_outputs) == 1:
         return chunked_outputs[0]
     return torch.cat(chunked_outputs, dim=0)
@@ -1229,7 +1228,6 @@ class Trainer():
     @torch.no_grad()
     def generate_(self, G, style, num_image_tiles=8):
         generated_images = evaluate_in_chunks(self.batch_size, G, style)
-        print(generated_images)
         return generated_images.clamp_(0., 1.)
 
     @torch.no_grad()
