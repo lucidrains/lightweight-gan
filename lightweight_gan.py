@@ -588,18 +588,21 @@ class Discriminator(nn.Module):
 
         last_chan = features[-1][-1]
         if disc_output_size == 5:
-            self.to_logits = nn.Sequential(
+            raise NotImplementedError  # though on projection 
+            self.to_pre_logits = nn.Sequential(
                 nn.Conv2d(last_chan, last_chan, 1),
                 nn.LeakyReLU(0.1),
                 nn.Conv2d(last_chan, 1, 4)
             )
         elif disc_output_size == 1:
-            self.to_logits = nn.Sequential(
+            self.to_pre_logits = nn.Sequential(
                 Blur(),
                 nn.Conv2d(last_chan, last_chan, 3, stride=2, padding=1),
                 nn.LeakyReLU(0.1),
-                nn.Conv2d(last_chan, 1, 4)
+                nn.Conv2d(last_chan, last_chan, 4),
+                nn.LeakyReLU(0.1)
             )
+            self.out = nn.Linear(last_chan, 1)
 
         self.to_shape_disc_out = nn.Sequential(
             nn.Conv2d(init_channel, 64, 3, padding=1),
@@ -656,7 +659,8 @@ class Discriminator(nn.Module):
             x = net(x)
             layer_outputs.append(x)
 
-        out = self.to_logits(x).flatten(1)
+        x = self.to_pre_logits(x).flatten(1)
+        out = self.out(x)
 
         if y is not None:
             print(self.l_y(y).shape, x.shape)
