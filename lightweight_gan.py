@@ -487,7 +487,8 @@ class Discriminator(nn.Module):
         fmap_inverse_coef=12,
         num_chans=3,
         disc_output_size=5,
-        attn_res_layers=[]
+        attn_res_layers=[],
+        num_classes=0,
     ):
         super().__init__()
         resolution = log2(image_size)
@@ -595,8 +596,21 @@ class Discriminator(nn.Module):
         self.decoder1 = SimpleDecoder(chan_in=last_chan, chan_out=init_channel)
         self.decoder2 = SimpleDecoder(
             chan_in=features[-2][-1], chan_out=init_channel) if resolution >= 9 else None
+        
+        if num_classes > 0:
+            self.l_y = nn.utils.spectral_norm(
+                nn.Embedding(num_classes, last_chan))
+        self._initialize()
+            
+            
+    def _initialize(self):
+        optional_l_y = getattr(self, 'l_y', None)
+        if optional_l_y is not None:
+            nn.init.xavier_uniform_(optional_l_y.weight.data)
 
-    def forward(self, x, calc_aux_loss=False):
+
+
+    def forward(self, x, y=None, calc_aux_loss=False):
         orig_img = x
 
         for layer in self.non_residual_layers:
@@ -613,8 +627,12 @@ class Discriminator(nn.Module):
 
         out = self.to_logits(x).flatten(1)
 
+        if y is not None:
+            out += torch.sum(self.l_y(y) * x, dim=1, keepdim=True)
+
         img_32x32 = F.interpolate(orig_img, size=(32, 32))
         out_32x32 = self.to_shape_disc_out(img_32x32)
+
 
         if not calc_aux_loss:
             return out, out_32x32, None
@@ -648,6 +666,7 @@ class Discriminator(nn.Module):
 
             aux_loss = aux_loss + aux_loss_16x16
 
+        # TODO: output vs aux loss? I think output, generator is bakcproped on it
         return out, out_32x32, aux_loss
 
 
