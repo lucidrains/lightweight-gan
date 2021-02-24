@@ -1019,7 +1019,7 @@ class Trainer():
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
             image_batch = next(self.loader)  # TODO: get optional labels here
             if self.num_classes > 0:
-                assert type(image_batch) is tuple, "Conditional GAN got no labels provided"
+                assert type(image_batch) in {tuple, list}, "Conditional GAN got no labels provided"
                 image_batch, y = image_batch
             else:
                 y = None
