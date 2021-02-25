@@ -641,7 +641,7 @@ class Discriminator(nn.Module):
                 nn.Embedding(num_classes, last_chan))
         self._initialize()
         
-        self.bn4decoder = nn.BatchNorm2d(num_chans) if bn4decoder else nn.Identity # GLU enforces not affine
+        self.bn4decoder = nn.BatchNorm2d(num_chans) if bn4decoder else nn.Identity() # GLU enforces not affine
             
             
     def _initialize(self):
