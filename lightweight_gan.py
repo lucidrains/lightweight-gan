@@ -847,7 +847,7 @@ class Trainer():
         world_size=1,
         multi_gpus=False,
         num_classes=0,
-        aux_loss_multi=20,
+        aux_loss_multi=1,
         *args,
         **kwargs
     ):
