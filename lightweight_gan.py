@@ -524,7 +524,7 @@ class Discriminator(nn.Module):
         disc_output_size=5,
         attn_res_layers=[],
         num_classes=0,
-        bn4decoder=True,
+        bn4decoder=False,
     ):
         super().__init__()
         resolution = log2(image_size)
