@@ -95,6 +95,7 @@ def train_from_dataset(
     seed=42,
     show_progress=False,
     num_classes=0,
+    aux_loss_multi=0.04
 ):
     num_image_tiles = default(num_image_tiles, 4 if image_size > 512 else 8)
 
@@ -121,7 +122,8 @@ def train_from_dataset(
         aug_types=cast_list(aug_types),
         dataset_aug_prob=dataset_aug_prob,
         multi_gpus=multi_gpus,
-        num_classes=num_classes
+        num_classes=num_classes,
+        aux_loss_multi=aux_loss_multi,
     )
 
     if generate:
