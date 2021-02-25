@@ -337,7 +337,7 @@ class FCANet(nn.Module):
         return self.net(x)
 
 # generative adversarial network
-EMBEDDING_DIM = 16
+EMBEDDING_DIM = 128
 
 class InitConv(nn.Module):
     def __init__(self, latent_dim, num_classes=0, embedding_dim=EMBEDDING_DIM):
@@ -359,6 +359,9 @@ class InitConv(nn.Module):
         
     def forward(self, x, y=None):
         left = self.c1(x)
+        # HERE 
+        return left
+    
         if y is None:
             if self.num_classes == 0:
                 return left
@@ -392,6 +395,8 @@ class Generator(nn.Module):
         
         self.init_conv = InitConv(latent_dim, num_classes)
             
+
+
         num_layers = int(resolution) - 2
         features = list(
             map(lambda n: (n,  2 ** (fmap_inverse_coef - n)), range(2, num_layers + 2)))
@@ -483,6 +488,7 @@ class SimpleDecoder(nn.Module):
         chan_in,
         chan_out=3,
         num_upsamples=4,
+        end_glu=True,
     ):
         super().__init__()
 
@@ -492,7 +498,7 @@ class SimpleDecoder(nn.Module):
 
         for ind in range(num_upsamples):
             last_layer = ind == (num_upsamples - 1)
-            chan_out = chans if not last_layer else final_chan * 2
+            chan_out = chans if (not last_layer or end_glu) else final_chan * 2
             layer = nn.Sequential(
                 upsample(),
                 nn.Conv2d(chans, chan_out, 3, padding=1),
@@ -500,6 +506,9 @@ class SimpleDecoder(nn.Module):
             )
             self.layers.append(layer)
             chans //= 2
+            
+        if end_glu:
+            self.layers.append(nn.Conv2d(chans, final_chan, 3, padding=1))
 
     def forward(self, x):
         for layer in self.layers:
@@ -518,6 +527,7 @@ class Discriminator(nn.Module):
         disc_output_size=5,
         attn_res_layers=[],
         num_classes=0,
+        bn4decoder=True,
     ):
         super().__init__()
         resolution = log2(image_size)
@@ -625,14 +635,16 @@ class Discriminator(nn.Module):
             nn.Conv2d(32, 1, 4)
         )
 
-        self.decoder1 = SimpleDecoder(chan_in=last_chan, chan_out=init_channel)
+        self.decoder1 = SimpleDecoder(chan_in=last_chan, chan_out=init_channel, end_glu=bn4decoder)
         self.decoder2 = SimpleDecoder(
-            chan_in=features[-2][-1], chan_out=init_channel) if resolution >= 9 else None
+            chan_in=features[-2][-1], chan_out=init_channel, end_glu=bn4decoder) if resolution >= 9 else None
         
         if num_classes > 0:
             self.l_y = nn.utils.spectral_norm(
                 nn.Embedding(num_classes, last_chan))
         self._initialize()
+        
+        self.bn4decoder = nn.BatchNorm2d(num_chans) if bn4decoder else nn.Identity() # GLU enforces not affine
             
             
     def _initialize(self):
@@ -679,7 +691,7 @@ class Discriminator(nn.Module):
 
         aux_loss = F.mse_loss(
             recon_img_8x8,
-            F.interpolate(orig_img, size=recon_img_8x8.shape[2:])
+            F.interpolate(self.bn4decoder(orig_img), size=recon_img_8x8.shape[2:])
         )
 
         if exists(self.decoder2):
@@ -694,7 +706,7 @@ class Discriminator(nn.Module):
 
             aux_loss_16x16 = F.mse_loss(
                 recon_img_16x16,
-                F.interpolate(img_part, size=recon_img_16x16.shape[2:])
+                F.interpolate(self.bn4decoder(img_part), size=recon_img_16x16.shape[2:])
             )
 
             aux_loss = aux_loss + aux_loss_16x16
@@ -838,6 +850,7 @@ class Trainer():
         world_size=1,
         multi_gpus=False,
         num_classes=0,
+        aux_loss_multi=0.04,
         *args,
         **kwargs
     ):
@@ -905,6 +918,7 @@ class Trainer():
         self.world_size = world_size
         self.multi_gpus = multi_gpus
         self.num_classes = num_classes
+        self.aux_loss_multi = aux_loss_multi
 
     @property
     def image_extension(self):
@@ -1045,7 +1059,7 @@ class Trainer():
             divergence_32x32 = hinge_loss(real_output_32x32, fake_output_32x32)
             disc_loss = divergence + divergence_32x32
 
-            aux_loss = real_aux_loss
+            aux_loss = real_aux_loss * self.aux_loss_multi
             disc_loss = disc_loss + aux_loss
             
             if apply_gradient_penalty:

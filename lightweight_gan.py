@@ -337,7 +337,7 @@ class FCANet(nn.Module):
         return self.net(x)
 
 # generative adversarial network
-EMBEDDING_DIM = 16
+EMBEDDING_DIM = 128
 
 class InitConv(nn.Module):
     def __init__(self, latent_dim, num_classes=0, embedding_dim=EMBEDDING_DIM):
