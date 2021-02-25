@@ -485,6 +485,7 @@ class SimpleDecoder(nn.Module):
         chan_in,
         chan_out=3,
         num_upsamples=4,
+        end_glu=True,
     ):
         super().__init__()
 
@@ -494,7 +495,7 @@ class SimpleDecoder(nn.Module):
 
         for ind in range(num_upsamples):
             last_layer = ind == (num_upsamples - 1)
-            chan_out = chans if not last_layer else final_chan * 2
+            chan_out = chans if (not last_layer and end_glu) else final_chan * 2
             layer = nn.Sequential(
                 upsample(),
                 nn.Conv2d(chans, chan_out, 3, padding=1),
@@ -502,6 +503,9 @@ class SimpleDecoder(nn.Module):
             )
             self.layers.append(layer)
             chans //= 2
+            
+        if end_glu:
+            self.layers.append(nn.Conv2d(chans, final_chan, 3, padding=1))
 
     def forward(self, x):
         for layer in self.layers:
@@ -520,6 +524,7 @@ class Discriminator(nn.Module):
         disc_output_size=5,
         attn_res_layers=[],
         num_classes=0,
+        bn4decoder=True,
     ):
         super().__init__()
         resolution = log2(image_size)
@@ -627,14 +632,16 @@ class Discriminator(nn.Module):
             nn.Conv2d(32, 1, 4)
         )
 
-        self.decoder1 = SimpleDecoder(chan_in=last_chan, chan_out=init_channel)
+        self.decoder1 = SimpleDecoder(chan_in=last_chan, chan_out=init_channel, end_glu=bn4decoder)
         self.decoder2 = SimpleDecoder(
-            chan_in=features[-2][-1], chan_out=init_channel) if resolution >= 9 else None
+            chan_in=features[-2][-1], chan_out=init_channel, end_glu=bn4decoder) if resolution >= 9 else None
         
         if num_classes > 0:
             self.l_y = nn.utils.spectral_norm(
                 nn.Embedding(num_classes, last_chan))
         self._initialize()
+        
+        self.bn4decoder = nn.BatchNorm2d(num_chans) if bn4decoder else nn.Identity # GLU enforces not affine
             
             
     def _initialize(self):
@@ -681,7 +688,7 @@ class Discriminator(nn.Module):
 
         aux_loss = F.mse_loss(
             recon_img_8x8,
-            F.interpolate(orig_img, size=recon_img_8x8.shape[2:])
+            F.interpolate(self.bn4decoder(orig_img), size=recon_img_8x8.shape[2:])
         )
 
         if exists(self.decoder2):
@@ -696,7 +703,7 @@ class Discriminator(nn.Module):
 
             aux_loss_16x16 = F.mse_loss(
                 recon_img_16x16,
-                F.interpolate(img_part, size=recon_img_16x16.shape[2:])
+                F.interpolate(self.bn4decoder(img_part), size=recon_img_16x16.shape[2:])
             )
 
             aux_loss = aux_loss + aux_loss_16x16
