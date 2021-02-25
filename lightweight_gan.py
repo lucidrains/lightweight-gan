@@ -495,7 +495,7 @@ class SimpleDecoder(nn.Module):
 
         for ind in range(num_upsamples):
             last_layer = ind == (num_upsamples - 1)
-            chan_out = chans if (not last_layer and not end_glu) else final_chan * 2
+            chan_out = chans if (not last_layer or end_glu) else final_chan * 2
             layer = nn.Sequential(
                 upsample(),
                 nn.Conv2d(chans, chan_out, 3, padding=1),
