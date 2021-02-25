@@ -840,6 +840,7 @@ class Trainer():
         world_size=1,
         multi_gpus=False,
         num_classes=0,
+        aux_loss_multi=20,
         *args,
         **kwargs
     ):
@@ -907,6 +908,7 @@ class Trainer():
         self.world_size = world_size
         self.multi_gpus = multi_gpus
         self.num_classes = num_classes
+        self.aux_loss_multi = aux_loss_multi
 
     @property
     def image_extension(self):
@@ -1047,7 +1049,7 @@ class Trainer():
             divergence_32x32 = hinge_loss(real_output_32x32, fake_output_32x32)
             disc_loss = divergence + divergence_32x32
 
-            aux_loss = real_aux_loss
+            aux_loss = real_aux_loss * self.aux_loss_multi
             disc_loss = disc_loss + aux_loss
             
             if apply_gradient_penalty:
