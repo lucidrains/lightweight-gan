@@ -26,6 +26,7 @@ from kornia import filter2D
 
 from diff_augment import DiffAugment
 from version import __version__
+from bn import CategoricalConditionalBatchNorm2d
 
 from tqdm import tqdm
 from einops import rearrange, reduce
@@ -369,6 +370,24 @@ class InitConv(nn.Module):
         return self.c2(torch.cat((left, right), 1))
         
 
+class GenSeq(nn.Module):
+    def __init__(self, chan_in, chan_out, num_classes=0):
+        super().__init__()
+        if num_classes > 0:
+            self.norm = CategoricalConditionalBatchNorm2d(num_classes, chan_out*2)
+        else: 
+            self.norm = norm_class(chan_out * 2)
+            
+        self.prenorm = nn.Sequential(upsample(), Blur(), nn.Conv2d(chan_in, chan_out * 2, 3, padding=1))
+        self.postnorm = nn.GLU(dim=1)
+        
+
+    def forward(self, x, y=None):
+        x = self.prenorm(x)
+        x = self.norm(x) if y is None else self.norm(x,y)
+        return self.postnorm(x)
+        
+        
 class Generator(nn.Module):
     def __init__(
         self,
@@ -390,7 +409,7 @@ class Generator(nn.Module):
 
         fmap_max = default(fmap_max, latent_dim)
         
-        self.init_conv = InitConv(latent_dim, num_classes)
+        self.init_conv = InitConv(latent_dim, 0)  # HERE
             
 
 
@@ -439,13 +458,7 @@ class Generator(nn.Module):
                     )
 
             layer = nn.ModuleList([
-                nn.Sequential(
-                    upsample(),
-                    Blur(),
-                    nn.Conv2d(chan_in, chan_out * 2, 3, padding=1),
-                    norm_class(chan_out * 2),
-                    nn.GLU(dim=1)
-                ),
+                GenSeq(chan_in, chan_out, num_classes),
                 sle,
                 attn
             ])
@@ -464,7 +477,7 @@ class Generator(nn.Module):
             if exists(attn):
                 x = attn(x) + x
 
-            x = up(x)
+            x = up(x, y)
 
             if exists(sle):
                 out_res = self.sle_map[res]
