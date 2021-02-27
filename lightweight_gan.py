@@ -404,7 +404,6 @@ class Catter(nn.Module):
         )
         
     def forward(self, x, y=None):
-        assert self.num_classes > 0
         im_width = x.shape[-1]
         assert im_width == x.shape[-2], "is image a square?"
         embedded = self.embed(y)[:, :, None, None].repeat(1, 1, im_width, im_width,)
