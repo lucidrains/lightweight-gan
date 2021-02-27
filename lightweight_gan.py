@@ -337,12 +337,15 @@ class FCANet(nn.Module):
                    'b c (h h1) (w w1) -> b c h1 w1', 'sum', h1=1, w1=1)
         return self.net(x)
 
+
 # generative adversarial network
 EMBEDDING_DIM = 128
+
 
 class InitConv(nn.Module):
     def __init__(self, latent_dim, num_classes=0, embedding_dim=EMBEDDING_DIM):
         super().__init__()
+        raise NotImplementedError
         self.c1 = nn.Sequential(
             nn.ConvTranspose2d(latent_dim, latent_dim * 2, 4),
             norm_class(latent_dim * 2),
@@ -356,8 +359,8 @@ class InitConv(nn.Module):
             nn.Conv2d(latent_dim+embedding_dim, latent_dim*2, 1),
             norm_class(latent_dim * 2),
             nn.GLU(dim=1)
-        )        
-        
+        )
+
     def forward(self, x, y=None):
         left = self.c1(x)
         if y is None:
@@ -366,30 +369,29 @@ class InitConv(nn.Module):
             else:
                 y = torch.randint(self.num_classes, x.shape[:1], device="cuda")
         assert self.num_classes > 0
-        right = self.embed(y)[:,:,None,None].repeat(1,1,4,4,)
+        right = self.embed(y)[:, :, None, None].repeat(1, 1, 4, 4,)
         return self.c2(torch.cat((left, right), 1))
-        
+
 
 class GenSeq(nn.Module):
     def __init__(self, chan_in, chan_out, num_classes=0):
         super().__init__()
         if num_classes > 0:
-            self.norm = CategoricalConditionalBatchNorm2d(num_classes, chan_out*2)
-        else: 
+            self.norm = CategoricalConditionalBatchNorm2d(
+                num_classes, chan_out*2)
+        else:
             self.norm = norm_class(chan_out * 2)
-            
-        self.prenorm = nn.Sequential(upsample(), Blur(), nn.Conv2d(chan_in, chan_out * 2, 3, padding=1))
+
+        self.prenorm = nn.Sequential(upsample(), Blur(), nn.Conv2d(
+            chan_in, chan_out * 2, 3, padding=1))
         self.postnorm = nn.GLU(dim=1)
-        
 
     def forward(self, x, y=None):
-        print(y is None)
-        print()
         x = self.prenorm(x)
-        x = self.norm(x) if y is None else self.norm(x,y)
+        x = self.norm(x) if y is None else self.norm(x, y)
         return self.postnorm(x)
-        
-        
+
+
 class Generator(nn.Module):
     def __init__(
         self,
@@ -410,10 +412,9 @@ class Generator(nn.Module):
         init_channel = num_chans
 
         fmap_max = default(fmap_max, latent_dim)
-        
-        self.init_conv = InitConv(latent_dim, 0)  # HERE
-            
 
+        self.init_conv = InitConv(latent_dim, 0)  # HERE
+        self.num_classes = num_classes
 
         num_layers = int(resolution) - 2
         features = list(
@@ -427,7 +428,7 @@ class Generator(nn.Module):
         self.res_layers = range(2, num_layers + 2)
         self.layers = nn.ModuleList([])
         self.res_to_feature_map = dict(zip(self.res_layers, in_out_features))
-    
+
         self.sle_map = ((3, 7), (4, 8), (5, 9), (6, 10))
         self.sle_map = list(
             filter(lambda t: t[0] <= resolution and t[1] <= resolution, self.sle_map))
@@ -474,7 +475,8 @@ class Generator(nn.Module):
         x = F.normalize(x, dim=1)
 
         residuals = dict()
-        print(y is None)
+        if self.num_classes > 0 and y is None:
+            y = torch.randint(self.num_classes, x.shape[:1], device="cuda")
         for (res, (up, sle, attn)) in zip(self.res_layers, self.layers):
             if exists(attn):
                 x = attn(x) + x
@@ -518,7 +520,7 @@ class SimpleDecoder(nn.Module):
             )
             self.layers.append(layer)
             chans //= 2
-            
+
         if end_glu:
             self.layers.append(nn.Conv2d(chans, final_chan, 3, padding=1))
 
@@ -608,7 +610,7 @@ class Discriminator(nn.Module):
 
         last_chan = features[-1][-1]
         if disc_output_size == 5:
-            raise NotImplementedError  # though on projection 
+            raise NotImplementedError  # though on projection
             self.to_pre_logits = nn.Sequential(
                 nn.Conv2d(last_chan, last_chan, 1),
                 nn.LeakyReLU(0.1),
@@ -647,24 +649,23 @@ class Discriminator(nn.Module):
             nn.Conv2d(32, 1, 4)
         )
 
-        self.decoder1 = SimpleDecoder(chan_in=last_chan, chan_out=init_channel, end_glu=bn4decoder)
+        self.decoder1 = SimpleDecoder(
+            chan_in=last_chan, chan_out=init_channel, end_glu=bn4decoder)
         self.decoder2 = SimpleDecoder(
             chan_in=features[-2][-1], chan_out=init_channel, end_glu=bn4decoder) if resolution >= 9 else None
-        
+
         if num_classes > 0:
             self.l_y = nn.utils.spectral_norm(
                 nn.Embedding(num_classes, last_chan))
         self._initialize()
-        
-        self.bn4decoder = nn.BatchNorm2d(num_chans) if bn4decoder else nn.Identity() # GLU enforces not affine
-            
-            
+
+        self.bn4decoder = nn.BatchNorm2d(
+            num_chans) if bn4decoder else nn.Identity()  # GLU enforces not affine
+
     def _initialize(self):
         optional_l_y = getattr(self, 'l_y', None)
         if optional_l_y is not None:
             nn.init.xavier_uniform_(optional_l_y.weight.data)
-
-
 
     def forward(self, x, y=None, calc_aux_loss=False):
         orig_img = x
@@ -690,7 +691,6 @@ class Discriminator(nn.Module):
         img_32x32 = F.interpolate(orig_img, size=(32, 32))
         out_32x32 = self.to_shape_disc_out(img_32x32)
 
-
         if not calc_aux_loss:
             return out, out_32x32, None
 
@@ -703,7 +703,8 @@ class Discriminator(nn.Module):
 
         aux_loss = F.mse_loss(
             recon_img_8x8,
-            F.interpolate(self.bn4decoder(orig_img), size=recon_img_8x8.shape[2:])
+            F.interpolate(self.bn4decoder(orig_img),
+                          size=recon_img_8x8.shape[2:])
         )
 
         if exists(self.decoder2):
@@ -718,7 +719,8 @@ class Discriminator(nn.Module):
 
             aux_loss_16x16 = F.mse_loss(
                 recon_img_16x16,
-                F.interpolate(self.bn4decoder(img_part), size=recon_img_16x16.shape[2:])
+                F.interpolate(self.bn4decoder(img_part),
+                              size=recon_img_16x16.shape[2:])
             )
 
             aux_loss = aux_loss + aux_loss_16x16
@@ -824,7 +826,7 @@ class LightweightGAN(nn.Module):
 
         return self.D_aug(
             generated_images, y, detach=detach_gen, **aug_kwargs)
-        
+
 
 # trainer
 
@@ -1005,11 +1007,12 @@ class Trainer():
         dataloader = DataLoader(self.dataset, num_workers=num_workers,
                                 batch_size=self.batch_size, drop_last=True, pin_memory=True)
         self.loader = cycle(dataloader)
-        
+
     def parallel(self):
-        self.parallel_D_aug = nn.DataParallel(self.GAN.D_aug) if self.multi_gpus else self.GAN.D_aug
-        self.parallel_GD = nn.DataParallel(self.GAN) if self.multi_gpus else self.GAN
-        
+        self.parallel_D_aug = nn.DataParallel(
+            self.GAN.D_aug) if self.multi_gpus else self.GAN.D_aug
+        self.parallel_GD = nn.DataParallel(
+            self.GAN) if self.multi_gpus else self.GAN
 
     def train(self):
         assert exists(
@@ -1036,7 +1039,7 @@ class Trainer():
         D = self.GAN.D
         D_aug = self.parallel_D_aug
         Y = self.parallel_GD
-    
+
         apply_gradient_penalty = self.steps % 4 == 0
 
         # amp related contexts and functions
@@ -1045,24 +1048,26 @@ class Trainer():
         self.GAN.D_opt.zero_grad()
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, False, ddps=[D_aug, G]):
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
-            image_batch = next(self.loader) 
+            image_batch = next(self.loader)
             if self.num_classes > 0:
-                assert type(image_batch) in {tuple, list}, "Conditional GAN got no labels provided"
+                assert type(image_batch) in {
+                    tuple, list}, "Conditional GAN got no labels provided"
                 image_batch, y = image_batch
                 y = y.cuda(self.rank)
             else:
                 y = None
-            image_batch = image_batch.cuda(self.rank) 
+            image_batch = image_batch.cuda(self.rank)
             image_batch.requires_grad_()
 
-
             fake_output, fake_output_32x32, _ = Y(latents, True, **aug_kwargs)
-            fake_output = fake_output.mean(0); fake_output_32x32 = fake_output_32x32.mean(0)
-            
+            fake_output = fake_output.mean(0)
+            fake_output_32x32 = fake_output_32x32.mean(0)
+
             real_output, real_output_32x32, real_aux_loss = D_aug(
                 image_batch, y, calc_aux_loss=True, **aug_kwargs)  # TODO: pass y from data here
-            real_output = real_output.mean(0); real_output_32x32 = real_output_32x32.mean(0); real_aux_loss = real_aux_loss.mean(0)
-
+            real_output = real_output.mean(0)
+            real_output_32x32 = real_output_32x32.mean(0)
+            real_aux_loss = real_aux_loss.mean(0)
 
             real_output_loss = real_output
             fake_output_loss = fake_output  # TODO: is this shape good?
@@ -1073,7 +1078,7 @@ class Trainer():
 
             aux_loss = real_aux_loss * self.aux_loss_multi
             disc_loss = disc_loss + aux_loss
-            
+
             if apply_gradient_penalty:
                 outputs = [real_output, real_output_32x32]
 
@@ -1096,7 +1101,7 @@ class Trainer():
                         self.last_gp_loss = gp.clone().detach().item()
 
             disc_loss = disc_loss / self.gradient_accumulate_every
-            
+
             disc_loss.register_hook(raise_if_nan)
             disc_loss.backward()
             total_disc_loss += divergence
@@ -1114,7 +1119,8 @@ class Trainer():
 
             fake_output, fake_output_32x32, _ = Y(latents, False, **aug_kwargs)
 
-            fake_output_loss = fake_output.mean(dim = 1) + fake_output_32x32.mean(dim = 1)
+            fake_output_loss = fake_output.mean(
+                dim=1) + fake_output_32x32.mean(dim=1)
 
             epochs = (self.steps * batch_size *
                       self.gradient_accumulate_every) / len(self.dataset)
@@ -1194,7 +1200,6 @@ class Trainer():
         generated_images = self.generate_(self.GAN.GE, latents)
         torchvision.utils.save_image(generated_images, str(
             self.results_dir / self.name / f'{str(num)}-ema.{ext}'), nrow=num_rows, padding=4, pad_value=1)
-
 
     @torch.no_grad()
     def generate(self, num=0, num_image_tiles=4, checkpoint=None, types=['default', 'ema']):
