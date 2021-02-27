@@ -423,7 +423,7 @@ class Generator(nn.Module):
         attn_res_layers=[],
         freq_chan_attn=False,
         num_classes=0,
-        cat_res_layers=[16],
+        cat_res_layers=[],
     ):
         super().__init__()
         assert num_classes > 0 or cat_res_layers == []
