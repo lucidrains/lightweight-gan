@@ -339,7 +339,7 @@ class FCANet(nn.Module):
 
 
 # generative adversarial network
-EMBEDDING_DIM = 128
+EMBEDDING_DIM = 16
 
 
 class InitConv(nn.Module):
@@ -391,6 +391,25 @@ class GenSeq(nn.Module):
         x = self.prenorm(x)
         x = self.norm(x) if y is None else self.norm(x, y)
         return self.postnorm(x)
+    
+    
+class Catter(nn.Module):
+    def __init__(self, feat_dim, embedding_dim, num_classes):
+        super().__init__()
+        self.embedding = nn.Embedding(num_classes, embedding_dim)
+        self.integrate = nn.Sequential(
+            nn.Conv2d(feat_dim+embedding_dim, feat_dim*2, 1),
+            norm_class(feat_dim * 2),
+            nn.GLU(dim=1)
+        )
+        
+    def forward(self, x, y=None):
+        assert self.num_classes > 0
+        im_width = x.shape[-1]
+        assert im_width == x.shape[-2], "is image a square?"
+        embedded = self.embed(y)[:, :, None, None].repeat(1, 1, im_width, im_width,)
+        return self.integrate(torch.cat((x, embedded), 1))
+
 
 
 class Generator(nn.Module):
@@ -405,8 +424,10 @@ class Generator(nn.Module):
         attn_res_layers=[],
         freq_chan_attn=False,
         num_classes=0,
+        cat_res_layers=[],
     ):
         super().__init__()
+        assert num_classes > 0 or cat_res_layers == []
         resolution = log2(image_size)
         assert is_power_of_two(image_size), 'image size must be a power of 2'
 
@@ -421,7 +442,7 @@ class Generator(nn.Module):
         features = list(
             map(lambda n: (n,  2 ** (fmap_inverse_coef - n)), range(2, num_layers + 2)))
         features = list(map(lambda n: (n[0], min(n[1], fmap_max)), features))
-        features = list(map(lambda n: 3 if n[0] >= 8 else n[1], features))
+        features = list(map(lambda n: 3 if n[0] >= 8 else n[1], features))  # TODO: should it be num chans?
         features = [latent_dim, *features]
 
         in_out_features = list(zip(features[:-1], features[1:]))
@@ -443,6 +464,8 @@ class Generator(nn.Module):
             attn = None
             if image_width in attn_res_layers:
                 attn = Rezero(GSA(dim=chan_in, norm_queries=True))
+                
+            cat = Catter(chan_out, EMBEDDING_DIM, num_classes) if image_width in cat_res_layers else nn.Identity()
 
             sle = None
             if res in self.sle_map:
@@ -462,7 +485,8 @@ class Generator(nn.Module):
                     )
 
             layer = nn.ModuleList([
-                GenSeq(chan_in, chan_out, num_classes),
+                cat,
+                GenSeq(chan_in, chan_out, 0),
                 sle,
                 attn
             ])
@@ -478,11 +502,12 @@ class Generator(nn.Module):
         residuals = dict()
         if self.num_classes > 0 and y is None:
             y = torch.randint(self.num_classes, x.shape[:1], device="cuda")
-        for (res, (up, sle, attn)) in zip(self.res_layers, self.layers):
+        for (res, (cat, up, sle, attn)) in zip(self.res_layers, self.layers):
+            x = cat(x, y)
             if exists(attn):
                 x = attn(x) + x
 
-            x = up(x, y)
+            x = up(x)  #, y)
 
             if exists(sle):
                 out_res = self.sle_map[res]
