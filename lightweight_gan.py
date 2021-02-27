@@ -406,7 +406,7 @@ class Catter(nn.Module):
     def forward(self, x, y=None):
         im_width = x.shape[-1]
         assert im_width == x.shape[-2], "is image a square?"
-        embedded = self.embed(y)[:, :, None, None].repeat(1, 1, im_width, im_width,)
+        embedded = self.embedding(y)[:, :, None, None].repeat(1, 1, im_width, im_width,)
         return self.integrate(torch.cat((x, embedded), 1))
 
 
