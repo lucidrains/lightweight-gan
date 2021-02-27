@@ -460,11 +460,11 @@ class Generator(nn.Module):
         for (res, (chan_in, chan_out)) in zip(self.res_layers, in_out_features):
             image_width = 2 ** res
 
+            cat = Catter(chan_in, EMBEDDING_DIM, num_classes) if image_width in cat_res_layers else None
             attn = None
             if image_width in attn_res_layers:
                 attn = Rezero(GSA(dim=chan_in, norm_queries=True))
                 
-            cat = Catter(chan_out, EMBEDDING_DIM, num_classes) if image_width in cat_res_layers else None
 
             sle = None
             if res in self.sle_map:
