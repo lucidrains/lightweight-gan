@@ -623,7 +623,7 @@ class Discriminator(nn.Module):
                 nn.Conv2d(last_chan, last_chan, 3, stride=2, padding=1),
                 nn.LeakyReLU(0.1),
                 nn.Conv2d(last_chan, last_chan, 4),
-                nn.LeakyReLU(0.1)
+                nn.ReLU()
             )
             self.out = nn.Linear(last_chan, 1)
 
