@@ -424,7 +424,7 @@ class Generator(nn.Module):
         attn_res_layers=[],
         freq_chan_attn=False,
         num_classes=0,
-        cat_res_layers=[],
+        cat_res_layers=[16],
     ):
         super().__init__()
         assert num_classes > 0 or cat_res_layers == []
@@ -465,7 +465,7 @@ class Generator(nn.Module):
             if image_width in attn_res_layers:
                 attn = Rezero(GSA(dim=chan_in, norm_queries=True))
                 
-            cat = Catter(chan_out, EMBEDDING_DIM, num_classes) if image_width in cat_res_layers else nn.Identity()
+            cat = Catter(chan_out, EMBEDDING_DIM, num_classes) if image_width in cat_res_layers else None
 
             sle = None
             if res in self.sle_map:
@@ -503,7 +503,8 @@ class Generator(nn.Module):
         if self.num_classes > 0 and y is None:
             y = torch.randint(self.num_classes, x.shape[:1], device="cuda")
         for (res, (cat, up, sle, attn)) in zip(self.res_layers, self.layers):
-            x = cat(x, y)
+            if exists(cat):
+                x = cat(x,y)
             if exists(attn):
                 x = attn(x) + x
 
