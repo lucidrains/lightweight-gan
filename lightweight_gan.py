@@ -345,7 +345,6 @@ EMBEDDING_DIM = 128
 class InitConv(nn.Module):
     def __init__(self, latent_dim, num_classes=0, embedding_dim=EMBEDDING_DIM):
         super().__init__()
-        raise NotImplementedError
         self.c1 = nn.Sequential(
             nn.ConvTranspose2d(latent_dim, latent_dim * 2, 4),
             norm_class(latent_dim * 2),
@@ -354,6 +353,8 @@ class InitConv(nn.Module):
         self.num_classes = num_classes
         if num_classes == 0:
             return
+        raise NotImplementedError
+
         self.embed = nn.Embedding(num_classes, embedding_dim)
         self.c2 = nn.Sequential(
             nn.Conv2d(latent_dim+embedding_dim, latent_dim*2, 1),
