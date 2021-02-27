@@ -383,6 +383,8 @@ class GenSeq(nn.Module):
         
 
     def forward(self, x, y=None):
+        print(y is None)
+        print()
         x = self.prenorm(x)
         x = self.norm(x) if y is None else self.norm(x,y)
         return self.postnorm(x)
@@ -472,7 +474,7 @@ class Generator(nn.Module):
         x = F.normalize(x, dim=1)
 
         residuals = dict()
-
+        print(y is None)
         for (res, (up, sle, attn)) in zip(self.res_layers, self.layers):
             if exists(attn):
                 x = attn(x) + x
