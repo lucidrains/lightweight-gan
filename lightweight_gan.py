@@ -543,6 +543,7 @@ class Discriminator(nn.Module):
         attn_res_layers=[],
         num_classes=0,
         bn4decoder=False,
+        projection_loss_scale=1
     ):
         super().__init__()
         resolution = log2(image_size)
@@ -662,6 +663,7 @@ class Discriminator(nn.Module):
 
         self.bn4decoder = nn.BatchNorm2d(
             num_chans) if bn4decoder else nn.Identity()  # GLU enforces not affine
+        self.projection_loss_scale = projection_loss_scale
 
     def _initialize(self):
         optional_l_y = getattr(self, 'l_y', None)
@@ -688,7 +690,7 @@ class Discriminator(nn.Module):
 
         # HERE V
         if y is not None:
-            out += 1e-5 * torch.sum(self.l_y(y) * x, dim=1, keepdim=True)
+            out += self.projection_loss_scale * torch.sum(self.l_y(y) * x, dim=1, keepdim=True)
 
         img_32x32 = F.interpolate(orig_img, size=(32, 32))
         out_32x32 = self.to_shape_disc_out(img_32x32)
@@ -749,6 +751,7 @@ class LightweightGAN(nn.Module):
         rank=0,
         ddp=False,
         num_classes=0,
+        projection_loss_scale=1
     ):
         super().__init__()
         self.latent_dim = latent_dim
@@ -775,6 +778,7 @@ class LightweightGAN(nn.Module):
             attn_res_layers=attn_res_layers,
             disc_output_size=disc_output_size,
             num_classes=num_classes,
+            projection_loss_scale=projection_loss_scale,
         )
 
         self.ema_updater = EMA(0.995)
@@ -867,6 +871,7 @@ class Trainer():
         multi_gpus=False,
         num_classes=0,
         aux_loss_multi=0.04,
+        projection_loss_scale=1
         *args,
         **kwargs
     ):
@@ -935,6 +940,7 @@ class Trainer():
         self.multi_gpus = multi_gpus
         self.num_classes = num_classes
         self.aux_loss_multi = aux_loss_multi
+        self.projection_loss_scale = projection_loss_scale
 
     @property
     def image_extension(self):
@@ -973,6 +979,7 @@ class Trainer():
             disc_output_size=self.disc_output_size,
             rank=self.rank,
             num_classes=self.num_classes,
+            projection_loss_scale=self.projection_loss_scale
             *args,
             **kwargs
         )
