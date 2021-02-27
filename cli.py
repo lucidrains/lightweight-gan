@@ -97,6 +97,7 @@ def train_from_dataset(
     num_classes=0,
     aux_loss_multi=1,
     projection_loss_scale=1,
+    cat_res_layers=[],
 ):
     num_image_tiles = default(num_image_tiles, 4 if image_size > 512 else 8)
 
@@ -126,6 +127,7 @@ def train_from_dataset(
         num_classes=num_classes,
         aux_loss_multi=aux_loss_multi,
         projection_loss_scale=projection_loss_scale,
+        cat_res_layers=cat_res_layers,
     )
 
     if generate:

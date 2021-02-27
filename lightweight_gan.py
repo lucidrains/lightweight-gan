@@ -424,6 +424,7 @@ class Generator(nn.Module):
         freq_chan_attn=False,
         num_classes=0,
         cat_res_layers=[],
+        embedding_dim=16,
     ):
         super().__init__()
         assert num_classes > 0 or cat_res_layers == []
@@ -460,7 +461,7 @@ class Generator(nn.Module):
         for (res, (chan_in, chan_out)) in zip(self.res_layers, in_out_features):
             image_width = 2 ** res
 
-            cat = Catter(chan_in, EMBEDDING_DIM, num_classes) if image_width in cat_res_layers else None
+            cat = Catter(chan_in, embedding_dim, num_classes) if image_width in cat_res_layers else None
             attn = None
             if image_width in attn_res_layers:
                 attn = Rezero(GSA(dim=chan_in, norm_queries=True))
@@ -776,7 +777,8 @@ class LightweightGAN(nn.Module):
         rank=0,
         ddp=False,
         num_classes=0,
-        projection_loss_scale=1
+        projection_loss_scale=1,
+        cat_res_layers=[]
     ):
         super().__init__()
         self.latent_dim = latent_dim
@@ -791,6 +793,7 @@ class LightweightGAN(nn.Module):
             attn_res_layers=attn_res_layers,
             freq_chan_attn=freq_chan_attn,
             num_classes=num_classes,
+            cat_res_layers=cat_res_layers
         )
 
         self.G = Generator(**G_kwargs)
@@ -897,6 +900,7 @@ class Trainer():
         num_classes=0,
         aux_loss_multi=0.04,
         projection_loss_scale=1,
+        cat_res_layers=[],
         *args,
         **kwargs
     ):
@@ -966,6 +970,7 @@ class Trainer():
         self.num_classes = num_classes
         self.aux_loss_multi = aux_loss_multi
         self.projection_loss_scale = projection_loss_scale
+        self.cat_res_layers = cat_res_layers
 
     @property
     def image_extension(self):
@@ -1005,6 +1010,7 @@ class Trainer():
             rank=self.rank,
             num_classes=self.num_classes,
             projection_loss_scale=self.projection_loss_scale,
+            cat_res_layers=self.cat_res_layers,
             *args,
             **kwargs
         )
