@@ -871,7 +871,7 @@ class Trainer():
         multi_gpus=False,
         num_classes=0,
         aux_loss_multi=0.04,
-        projection_loss_scale=1
+        projection_loss_scale=1,
         *args,
         **kwargs
     ):
