@@ -687,7 +687,7 @@ class Discriminator(nn.Module):
         out = self.out(x)
 
         # HERE V
-        if False and y is not None:
+        if y is not None:
             out += torch.sum(self.l_y(y) * x, dim=1, keepdim=True)
 
         img_32x32 = F.interpolate(orig_img, size=(32, 32))
