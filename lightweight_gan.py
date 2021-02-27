@@ -690,7 +690,7 @@ class Discriminator(nn.Module):
 
         # HERE V
         if y is not None:
-            out += self.projection_loss_scale * torch.sum(self.l_y(y) * x, dim=1, keepdim=True)
+            out += torch.sum(self.l_y(y) * x, dim=1, keepdim=True) * 1e-3
 
         img_32x32 = F.interpolate(orig_img, size=(32, 32))
         out_32x32 = self.to_shape_disc_out(img_32x32)
