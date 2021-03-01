@@ -376,6 +376,7 @@ class InitConv(nn.Module):
 
 class GenSeq(nn.Module):
     def __init__(self, chan_in, chan_out, num_classes=0):
+        raise NotImplementedError
         super().__init__()
         if num_classes > 0:
             self.norm = CategoricalConditionalBatchNorm2d(
@@ -462,6 +463,8 @@ class Generator(nn.Module):
             image_width = 2 ** res
 
             cat = Catter(chan_in, embedding_dim, num_classes) if image_width in cat_res_layers else None
+            if cat: print(f"image width of ")
+            
             attn = None
             if image_width in attn_res_layers:
                 attn = Rezero(GSA(dim=chan_in, norm_queries=True))
@@ -485,8 +488,13 @@ class Generator(nn.Module):
                     )
 
             layer = nn.ModuleList([
-                cat,
-                GenSeq(chan_in, chan_out, 0),
+                nn.Sequential(
+                    upsample(),
+                    Blur(),
+                    nn.Conv2d(chan_in, chan_out * 2, 3, padding=1),
+                    norm_class(chan_out * 2),
+                    nn.GLU(dim=1)
+                ),
                 sle,
                 attn
             ])
@@ -504,6 +512,7 @@ class Generator(nn.Module):
             y = torch.randint(self.num_classes, x.shape[:1], device="cuda")
         for (res, (cat, up, sle, attn)) in zip(self.res_layers, self.layers):
             if exists(cat):
+                raise NotImplementedError
                 x = cat(x,y)
             if exists(attn):
                 x = attn(x) + x
@@ -687,8 +696,6 @@ class Discriminator(nn.Module):
                 nn.Embedding(num_classes, last_chan))
         self._initialize()
 
-        self.bn4decoder = nn.BatchNorm2d(
-            num_chans) if bn4decoder else nn.Identity()  # GLU enforces not affine
         self.projection_loss_scale = projection_loss_scale
 
     def _initialize(self):
@@ -733,7 +740,7 @@ class Discriminator(nn.Module):
 
         aux_loss = F.mse_loss(
             recon_img_8x8,
-            F.interpolate(self.bn4decoder(orig_img),
+            F.interpolate(orig_img,
                           size=recon_img_8x8.shape[2:])
         )
 
@@ -749,7 +756,7 @@ class Discriminator(nn.Module):
 
             aux_loss_16x16 = F.mse_loss(
                 recon_img_16x16,
-                F.interpolate(self.bn4decoder(img_part),
+                F.interpolate(img_part,
                               size=recon_img_16x16.shape[2:])
             )
 
