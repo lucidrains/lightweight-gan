@@ -514,7 +514,6 @@ class Generator(nn.Module):
         for (res, (cat, up, sle, attn)) in zip(self.res_layers, self.layers):
             if exists(cat):
                 print(cat)
-                raise NotImplementedError
                 x = cat(x,y)
             if exists(attn):
                 x = attn(x) + x
