@@ -458,12 +458,12 @@ class Generator(nn.Module):
         self.sle_map = dict(self.sle_map)
 
         self.num_layers_spatial_res = 1
-
         for (res, (chan_in, chan_out)) in zip(self.res_layers, in_out_features):
             image_width = 2 ** res
 
             cat = Catter(chan_in, embedding_dim, num_classes) if image_width in cat_res_layers else None
-            if cat: print(f"image width of ")
+            if cat: print(f"image width of {image_width}")
+            
             
             attn = None
             if image_width in attn_res_layers:
