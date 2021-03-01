@@ -488,7 +488,7 @@ class Generator(nn.Module):
                     )
 
             layer = nn.ModuleList([
-                cat,
+                cat, 
                 nn.Sequential(
                     upsample(),
                     Blur(),
