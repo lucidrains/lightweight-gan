@@ -513,6 +513,7 @@ class Generator(nn.Module):
             y = torch.randint(self.num_classes, x.shape[:1], device="cuda")
         for (res, (cat, up, sle, attn)) in zip(self.res_layers, self.layers):
             if exists(cat):
+                print(cat)
                 raise NotImplementedError
                 x = cat(x,y)
             if exists(attn):
