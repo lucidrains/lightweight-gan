@@ -107,7 +107,7 @@ def hinge_loss(real, fake):
 
 
 def evaluate_in_chunks(max_batch_size, model, y=None, *args):
-    if is not None: args.append(y)
+    if y is not None: args.append(y)
     split_args = list(
         zip(*list(map(lambda x: x.split(max_batch_size, dim=0), args))))
     chunked_outputs = [model(*i) for i in split_args]
