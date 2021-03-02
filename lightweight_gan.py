@@ -1206,6 +1206,7 @@ class Trainer():
         if any(torch.isnan(l) for l in (total_gen_loss, total_disc_loss)):
             print(
                 f'NaN detected for generator or discriminator. Loading from checkpoint #{self.checkpoint_num}')
+            raise NanException
             self.load(self.checkpoint_num)
 
         del total_disc_loss
@@ -1412,6 +1413,7 @@ class Trainer():
 
         if print_version and 'version' in load_data and self.is_main:
             print(f"loading from version {load_data['version']}")
+            
 
         try:
             self.GAN.load_state_dict(load_data['GAN'])
