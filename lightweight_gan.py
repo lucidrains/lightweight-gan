@@ -107,6 +107,7 @@ def hinge_loss(real, fake):
 
 
 def evaluate_in_chunks(max_batch_size, model, y=None, *args):
+    if is not None: args.append(y)
     split_args = list(
         zip(*list(map(lambda x: x.split(max_batch_size, dim=0), args))))
     chunked_outputs = [model(*i) for i in split_args]
@@ -1320,7 +1321,7 @@ class Trainer():
 
     @torch.no_grad()
     def generate_(self, G, style, y=None, num_image_tiles=8):
-        generated_images = evaluate_in_chunks(self.batch_size, G, style, y)
+        generated_images = evaluate_in_chunks(self.batch_size, G, y, style)
         return generated_images.clamp_(0., 1.)
 
     @torch.no_grad()
