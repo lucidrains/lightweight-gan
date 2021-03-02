@@ -106,7 +106,7 @@ def hinge_loss(real, fake):
     return (F.relu(1 + real) + F.relu(1 - fake)).mean()
 
 
-def evaluate_in_chunks(max_batch_size, model, *args):
+def evaluate_in_chunks(max_batch_size, model, y=None, *args):
     split_args = list(
         zip(*list(map(lambda x: x.split(max_batch_size, dim=0), args))))
     chunked_outputs = [model(*i) for i in split_args]
@@ -1206,7 +1206,6 @@ class Trainer():
             print(
                 f'NaN detected for generator or discriminator. Loading from checkpoint #{self.checkpoint_num}')
             self.load(self.checkpoint_num)
-            raise NanException
 
         del total_disc_loss
         del total_gen_loss
@@ -1320,8 +1319,8 @@ class Trainer():
                     generated_image, path, nrow=num_images)
 
     @torch.no_grad()
-    def generate_(self, G, style, num_image_tiles=8):
-        generated_images = evaluate_in_chunks(self.batch_size, G, style)
+    def generate_(self, G, style, y=None, num_image_tiles=8):
+        generated_images = evaluate_in_chunks(self.batch_size, G, style, y)
         return generated_images.clamp_(0., 1.)
 
     @torch.no_grad()
