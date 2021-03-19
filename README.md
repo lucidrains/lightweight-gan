@@ -180,7 +180,7 @@ $ lightweight_gan \
   --num-image-tiles {count of image result}
 ```
 
-After run this command you will get folder near results image folder with postfix "-progress".
+After running this command you will get a new folder in the results folder, with postfix "-progress". You can convert the images to a video with ffmpeg using the command "ffmpeg -framerate 10 -pattern_type glob -i '*-ema.jpg' out.mp4".
 
 ![Show progress gif demonstration](./docs/show_progress/show-progress.gif)
 
