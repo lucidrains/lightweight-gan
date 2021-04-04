@@ -28,7 +28,7 @@ from lightweight_gan.diff_augment import DiffAugment
 from lightweight_gan.version import __version__
 
 from tqdm import tqdm
-from einops import rearrange, reduce
+from einops import rearrange, reduce, repeat
 
 from adabelief_pytorch import AdaBelief
 from gsa_pytorch import GSA
@@ -92,6 +92,18 @@ def gradient_accumulate_contexts(gradient_accumulate_every, is_ddp, ddps):
 
 def hinge_loss(real, fake):
     return (F.relu(1 + real) + F.relu(1 - fake)).mean()
+
+def dual_contrastive_loss(real_logits, fake_logits, eps = 1e-20):
+    device = real_logits.device
+    real_logits, fake_logits = map(lambda t: rearrange(t, '... -> (...)'), (real_logits, fake_logits))
+
+    def loss_half(t1, t2):
+        t1 = rearrange(t1, 'i -> i ()')
+        t2 = repeat(t2, 'j -> i j', i = t1.shape[0])
+        t = torch.cat((t1, t2), dim = -1)
+        return F.cross_entropy(t, torch.zeros(t1.shape[0], device = device, dtype = torch.long))
+
+    return loss_half(real_logits, fake_logits) + loss_half(-fake_logits, -real_logits)
 
 def evaluate_in_chunks(max_batch_size, model, *args):
     split_args = list(zip(*list(map(lambda x: x.split(max_batch_size, dim=0), args))))
@@ -1036,8 +1048,8 @@ class Trainer():
                 real_output_loss = real_output
                 fake_output_loss = fake_output
 
-                divergence = hinge_loss(real_output_loss, fake_output_loss)
-                divergence_32x32 = hinge_loss(real_output_32x32, fake_output_32x32)
+                divergence = dual_contrastive_loss(real_output_loss, fake_output_loss)
+                divergence_32x32 = dual_contrastive_loss(real_output_32x32, fake_output_32x32)
                 disc_loss = divergence + divergence_32x32
 
                 aux_loss = real_aux_loss
@@ -1082,21 +1094,20 @@ class Trainer():
 
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[G, D_aug]):
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
+            image_batch = next(self.loader).cuda(self.rank)
+            image_batch.requires_grad_()
 
             with amp_context():
                 generated_images = G(latents)
+
                 fake_output, fake_output_32x32, _ = D_aug(generated_images, **aug_kwargs)
-                fake_output_loss = fake_output.mean(dim = 1) + fake_output_32x32.mean(dim = 1)
 
-                epochs = (self.steps * batch_size * self.gradient_accumulate_every) / len(self.dataset)
-                k_frac = max(self.generator_top_k_gamma ** epochs, self.generator_top_k_frac)
-                k = math.ceil(batch_size * k_frac)
+                real_output, real_output_32x32, _ = D_aug(image_batch, **aug_kwargs)
 
-                if k != batch_size:
-                    fake_output_loss, _ = fake_output_loss.topk(k=k, largest=False)
+                loss = dual_contrastive_loss(fake_output, real_output)
+                loss_32x32 = dual_contrastive_loss(fake_output_32x32, real_output_32x32)
 
-                loss = fake_output_loss.mean()
-                gen_loss = loss
+                gen_loss = loss + loss_32x32
 
                 gen_loss = gen_loss / self.gradient_accumulate_every
 
