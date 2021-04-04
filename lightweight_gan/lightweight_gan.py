@@ -93,7 +93,7 @@ def gradient_accumulate_contexts(gradient_accumulate_every, is_ddp, ddps):
 def hinge_loss(real, fake):
     return (F.relu(1 + real) + F.relu(1 - fake)).mean()
 
-def dual_contrastive_loss(real_logits, fake_logits, eps = 1e-20):
+def dual_contrastive_loss(real_logits, fake_logits):
     device = real_logits.device
     real_logits, fake_logits = map(lambda t: rearrange(t, '... -> (...)'), (real_logits, fake_logits))
 
