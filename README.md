@@ -278,4 +278,5 @@ If you want the current state of the art GAN, you can find it at https://github.
     primaryClass = {cs.CV}
 }
 ```
+
 *What I cannot create, I do not understand* - Richard Feynman
