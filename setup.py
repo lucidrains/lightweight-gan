@@ -27,7 +27,6 @@ setup(
     'adabelief-pytorch',
     'einops>=0.3',
     'fire',
-    'gsa_pytorch',
     'kornia',
     'numpy',
     'pillow',

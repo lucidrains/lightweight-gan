@@ -31,7 +31,6 @@ from tqdm import tqdm
 from einops import rearrange, reduce, repeat
 
 from adabelief_pytorch import AdaBelief
-from gsa_pytorch import GSA
 
 # asserts
 
@@ -90,21 +89,6 @@ def gradient_accumulate_contexts(gradient_accumulate_every, is_ddp, ddps):
         with context():
             yield
 
-def hinge_loss(real, fake):
-    return (F.relu(1 + real) + F.relu(1 - fake)).mean()
-
-def dual_contrastive_loss(real_logits, fake_logits):
-    device = real_logits.device
-    real_logits, fake_logits = map(lambda t: rearrange(t, '... -> (...)'), (real_logits, fake_logits))
-
-    def loss_half(t1, t2):
-        t1 = rearrange(t1, 'i -> i ()')
-        t2 = repeat(t2, 'j -> i j', i = t1.shape[0])
-        t = torch.cat((t1, t2), dim = -1)
-        return F.cross_entropy(t, torch.zeros(t1.shape[0], device = device, dtype = torch.long))
-
-    return loss_half(real_logits, fake_logits) + loss_half(-fake_logits, -real_logits)
-
 def evaluate_in_chunks(max_batch_size, model, *args):
     split_args = list(zip(*list(map(lambda x: x.split(max_batch_size, dim=0), args))))
     chunked_outputs = [model(*i) for i in split_args]
@@ -127,6 +111,26 @@ def safe_div(n, d):
         prefix = '' if int(n >= 0) else '-'
         res = float(f'{prefix}inf')
     return res
+
+# loss functions
+
+def gen_hinge_loss(fake, real):
+    return fake.mean()
+
+def hinge_loss(real, fake):
+    return (F.relu(1 + real) + F.relu(1 - fake)).mean()
+
+def dual_contrastive_loss(real_logits, fake_logits):
+    device = real_logits.device
+    real_logits, fake_logits = map(lambda t: rearrange(t, '... -> (...)'), (real_logits, fake_logits))
+
+    def loss_half(t1, t2):
+        t1 = rearrange(t1, 'i -> i ()')
+        t2 = repeat(t2, 'j -> i j', i = t1.shape[0])
+        t = torch.cat((t1, t2), dim = -1)
+        return F.cross_entropy(t, torch.zeros(t1.shape[0], device = device, dtype = torch.long))
+
+    return loss_half(real_logits, fake_logits) + loss_half(-fake_logits, -real_logits)
 
 # helper classes
 
@@ -152,11 +156,12 @@ class RandomApply(nn.Module):
         fn = self.fn if random() < self.prob else self.fn_else
         return fn(x)
 
-class Rezero(nn.Module):
-    def __init__(self, fn):
+class LayerScale(nn.Module):
+    def __init__(self, dim, fn):
         super().__init__()
         self.fn = fn
-        self.g = nn.Parameter(torch.tensor(1e-3))
+        scale = torch.zeros(1, dim, 1, 1).fill_(1e-3)
+        self.g = nn.Parameter(scale)
 
     def forward(self, x):
         return self.g * self.fn(x)
@@ -185,6 +190,47 @@ class Blur(nn.Module):
         f = self.f
         f = f[None, None, :] * f [None, :, None]
         return filter2D(x, f, normalized=True)
+
+# attention
+
+class DepthWiseConv2d(nn.Module):
+    def __init__(self, dim_in, dim_out, kernel_size, padding = 0, stride = 1, bias = True):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(dim_in, dim_in, kernel_size = kernel_size, padding = padding, groups = dim_in, stride = stride, bias = bias),
+            nn.Conv2d(dim_in, dim_out, kernel_size = 1, bias = bias)
+        )
+    def forward(self, x):
+        return self.net(x)
+
+class LinearAttention(nn.Module):
+    def __init__(self, dim, dim_head = 64, heads = 8):
+        super().__init__()
+        self.scale = dim_head ** -0.5
+        self.heads = heads
+        inner_dim = dim_head * heads
+
+        self.nonlin = nn.GELU()
+        self.to_q = nn.Conv2d(dim, inner_dim, 1, bias = False)
+        self.to_kv = DepthWiseConv2d(dim, inner_dim * 2, 3, padding = 1, bias = False)
+        self.to_out = nn.Conv2d(inner_dim, dim, 1)
+
+    def forward(self, fmap):
+        h, x, y = self.heads, *fmap.shape[-2:]
+        q, k, v = (self.to_q(fmap), *self.to_kv(fmap).chunk(2, dim = 1))
+        q, k, v = map(lambda t: rearrange(t, 'b (h c) x y -> (b h) (x y) c', h = h), (q, k, v))
+
+        q = q.softmax(dim = -1)
+        k = k.softmax(dim = -2)
+
+        q = q * self.scale
+
+        context = einsum('b n d, b n e -> b d e', k, v)
+        out = einsum('b n d, b d e -> b n e', q, context)
+        out = rearrange(out, '(b h) (x y) d -> b (h d) x y', h = h, x = x, y = y)
+
+        out = self.nonlin(out)
+        return self.to_out(out)
 
 # dataset
 
@@ -437,7 +483,7 @@ class Generator(nn.Module):
 
             attn = None
             if image_width in attn_res_layers:
-                attn = Rezero(GSA(dim = chan_in, norm_queries = True))
+                attn = LayerScale(chan_in, LinearAttention(chan_in))
 
             sle = None
             if res in self.sle_map:
@@ -583,7 +629,7 @@ class Discriminator(nn.Module):
 
             attn = None
             if image_width in attn_res_layers:
-                attn = Rezero(GSA(dim = chan_in, batch_norm = False, norm_queries = True))
+                attn = LayerScale(chan_in, LinearAttention(chan_in))
 
             self.residual_layers.append(nn.ModuleList([
                 SumBranches([
@@ -621,7 +667,7 @@ class Discriminator(nn.Module):
 
         self.to_shape_disc_out = nn.Sequential(
             nn.Conv2d(init_channel, 64, 3, padding = 1),
-            Residual(Rezero(GSA(dim = 64, norm_queries = True, batch_norm = False))),
+            Residual(LayerScale(64, LinearAttention(64))),
             SumBranches([
                 nn.Sequential(
                     Blur(),
@@ -637,7 +683,7 @@ class Discriminator(nn.Module):
                     nn.LeakyReLU(0.1),
                 )
             ]),
-            Residual(Rezero(GSA(dim = 32, norm_queries = True, batch_norm = False))),
+            Residual(LayerScale(32, LinearAttention(32))),
             nn.AdaptiveAvgPool2d((4, 4)),
             nn.Conv2d(32, 1, 4)
         )
@@ -807,6 +853,7 @@ class Trainer():
         attn_res_layers = [],
         freq_chan_attn = False,
         disc_output_size = 5,
+        dual_contrast_loss = False,
         antialias = False,
         lr = 2e-4,
         lr_mlp = 1.,
@@ -843,6 +890,8 @@ class Trainer():
         assert is_power_of_two(image_size), 'image size must be a power of 2 (64, 128, 256, 512, 1024)'
         assert all(map(is_power_of_two, attn_res_layers)), 'resolution layers of attention must all be powers of 2 (16, 32, 64, 128, 256, 512)'
 
+        assert not (dual_contrast_loss and disc_output_size > 1), 'discriminator output size cannot be greater than 1 if using dual contrastive loss'
+
         self.image_size = image_size
         self.num_image_tiles = num_image_tiles
 
@@ -869,14 +918,13 @@ class Trainer():
         self.save_every = save_every
         self.steps = 0
 
-        self.generator_top_k_gamma = 0.99
-        self.generator_top_k_frac = 0.5
-
         self.attn_res_layers = attn_res_layers
         self.freq_chan_attn = freq_chan_attn
 
         self.disc_output_size = disc_output_size
         self.antialias = antialias
+
+        self.dual_contrast_loss = dual_contrast_loss
 
         self.d_loss = 0
         self.g_loss = 0
@@ -1030,7 +1078,15 @@ class Trainer():
 
         amp_context = autocast if self.amp else null_context
 
+        # discriminator loss fn
+
+        if self.dual_contrast_loss:
+            D_loss_fn = dual_contrastive_loss
+        else:
+            D_loss_fn = hinge_loss
+
         # train discriminator
+
         self.GAN.D_opt.zero_grad()
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[D_aug, G]):
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
@@ -1048,8 +1104,8 @@ class Trainer():
                 real_output_loss = real_output
                 fake_output_loss = fake_output
 
-                divergence = dual_contrastive_loss(real_output_loss, fake_output_loss)
-                divergence_32x32 = dual_contrastive_loss(real_output_32x32, fake_output_32x32)
+                divergence = D_loss_fn(real_output_loss, fake_output_loss)
+                divergence_32x32 = D_loss_fn(real_output_32x32, fake_output_32x32)
                 disc_loss = divergence + divergence_32x32
 
                 aux_loss = real_aux_loss
@@ -1088,24 +1144,34 @@ class Trainer():
         self.D_scaler.step(self.GAN.D_opt)
         self.D_scaler.update()
 
+        # generator loss fn
+
+        if self.dual_contrast_loss:
+            G_loss_fn = dual_contrastive_loss
+            G_requires_calc_real = True
+        else:
+            G_loss_fn = gen_hinge_loss
+            G_requires_calc_real = False
+
         # train generator
 
         self.GAN.G_opt.zero_grad()
 
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[G, D_aug]):
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
-            image_batch = next(self.loader).cuda(self.rank)
-            image_batch.requires_grad_()
+
+            if G_requires_calc_real:
+                image_batch = next(self.loader).cuda(self.rank)
+                image_batch.requires_grad_()
 
             with amp_context():
                 generated_images = G(latents)
 
                 fake_output, fake_output_32x32, _ = D_aug(generated_images, **aug_kwargs)
+                real_output, real_output_32x32, _ = D_aug(image_batch, **aug_kwargs) if G_requires_calc_real else (None, None, None)
 
-                real_output, real_output_32x32, _ = D_aug(image_batch, **aug_kwargs)
-
-                loss = dual_contrastive_loss(fake_output, real_output)
-                loss_32x32 = dual_contrastive_loss(fake_output_32x32, real_output_32x32)
+                loss = G_loss_fn(fake_output, real_output)
+                loss_32x32 = G_loss_fn(fake_output_32x32, real_output_32x32)
 
                 gen_loss = loss + loss_32x32
 

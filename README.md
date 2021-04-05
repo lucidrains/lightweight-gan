@@ -204,6 +204,16 @@ You can add linear + axial attention to specific resolution layers with the foll
 $ lightweight_gan --data ./path/to/images --image-size 512 --attn-res-layers [32,64] --aug-prob 0.25
 ```
 
+## Dual Contrastive Loss
+
+A recent paper has proposed that a novel contrastive loss between the real and fake logits can improve quality slightly over the default hinge loss.
+
+You can use this with one extra flag as follows
+
+```bash
+$ lightweight_gan --data ./path/to/images --dual-contrast-loss
+```
+
 ## Bonus
 
 You can also train with transparent images
@@ -237,18 +247,6 @@ If you want the current state of the art GAN, you can find it at https://github.
 ```
 
 ```bibtex
-@inproceedings{
-    anonymous2021global,
-    title   = {Global Self-Attention Networks},
-    author  = {Anonymous},
-    booktitle = {Submitted to International Conference on Learning Representations},
-    year    = {2021},
-    url     = {https://openreview.net/forum?id=KiFeuZu24k},
-    note    = {under review}
-}
-```
-
-```bibtex
 @misc{cao2020global,
     title   = {Global Context Networks},
     author  = {Yue Cao and Jiarui Xu and Stephen Lin and Fangyun Wei and Han Hu},
@@ -267,17 +265,6 @@ If you want the current state of the art GAN, you can find it at https://github.
     eprint  = {2012.11879},
     archivePrefix = {arXiv},
     primaryClass = {cs.CV}
-}
-```
-
-```bibtex
-@misc{sinha2020topk,
-    title   = {Top-k Training of GANs: Improving GAN Performance by Throwing Away Bad Samples},
-    author  = {Samarth Sinha and Zhengli Zhao and Anirudh Goyal and Colin Raffel and Augustus Odena},
-    year    = {2020},
-    eprint  = {2002.06224},
-    archivePrefix = {arXiv},
-    primaryClass = {stat.ML}
 }
 ```
 
