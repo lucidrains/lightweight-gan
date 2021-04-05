@@ -1286,6 +1286,8 @@ class Trainer():
         ext = self.image_extension
         latents = None
 
+        zfill_length = math.ceil(math.log10(len(checkpoints)))
+
         if not dir_full.exists():
             os.mkdir(dir_full)
 
@@ -1299,13 +1301,13 @@ class Trainer():
             # regular
             if 'default' in types:
                 generated_image = self.generate_(self.GAN.G, latents)
-                path = str(self.results_dir / dir_name / f'{str(checkpoint)}.{ext}')
+                path = str(self.results_dir / dir_name / f'{str(checkpoint).zfill(zfill_length)}.{ext}')
                 torchvision.utils.save_image(generated_image, path, nrow=num_images)
 
             # moving averages
             if 'ema' in types:
                 generated_image = self.generate_(self.GAN.GE, latents)
-                path = str(self.results_dir / dir_name / f'{str(checkpoint)}-ema.{ext}')
+                path = str(self.results_dir / dir_name / f'{str(checkpoint).zfill(zfill_length)}-ema.{ext}')
                 torchvision.utils.save_image(generated_image, path, nrow=num_images)
 
     @torch.no_grad()
