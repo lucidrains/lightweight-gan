@@ -22,7 +22,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from PIL import Image
 import torchvision
 from torchvision import transforms
-from kornia import filter2D
+from kornia import filter2d
 
 from lightweight_gan.diff_augment import DiffAugment
 from lightweight_gan.version import __version__
@@ -190,7 +190,7 @@ class Blur(nn.Module):
     def forward(self, x):
         f = self.f
         f = f[None, None, :] * f [None, :, None]
-        return filter2D(x, f, normalized=True)
+        return filter2d(x, f, normalized=True)
 
 # attention
 
