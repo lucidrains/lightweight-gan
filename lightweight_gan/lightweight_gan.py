@@ -1208,7 +1208,6 @@ class Trainer():
         # periodically save results
 
         if self.is_main:
-
             if self.steps % self.save_every == 0:
                 self.save(self.checkpoint_num)
                 self.last_checkpoint_step = self.steps
