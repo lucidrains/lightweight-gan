@@ -1199,7 +1199,6 @@ class Trainer():
         if any(torch.isnan(l) for l in (total_gen_loss, total_disc_loss)):
             print(f'NaN detected for generator or discriminator. Loading from checkpoint #{self.checkpoint_num}')
             self.load(self.checkpoint_num)
-            self.steps = self.last_checkpoint_step
             raise NanException
 
         del total_disc_loss
@@ -1210,7 +1209,6 @@ class Trainer():
         if self.is_main:
             if self.steps % self.save_every == 0:
                 self.save(self.checkpoint_num)
-                self.last_checkpoint_step = self.steps
 
             if self.steps % self.evaluate_every == 0 or (self.steps % 100 == 0 and self.steps < 20000):
                 self.evaluate(floor(self.steps / self.evaluate_every), num_image_tiles = self.num_image_tiles)
