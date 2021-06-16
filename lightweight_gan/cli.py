@@ -64,9 +64,9 @@ def run_training(rank, world_size, model_args, data, load_from, new, num_train_s
 
     progress_bar = tqdm(initial = model.steps, total = num_train_steps, mininterval=10., desc=f'{name}<{data}>')
     while model.steps < num_train_steps:
-        progress_bar.refresh()
         retry_call(model.train, tries=3, exceptions=NanException)
         progress_bar.n = model.steps
+        progress_bar.refresh()
         if is_main and model.steps % 50 == 0:
             model.print_log()
 
