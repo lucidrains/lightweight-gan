@@ -644,7 +644,6 @@ class Discriminator(nn.Module):
             self.non_residual_layers.append(nn.Sequential(
                 Blur(),
                 nn.Conv2d(init_channel, chan_out, 4, stride = 2, padding = 1),
-                Noise(),
                 nn.LeakyReLU(0.1)
             ))
 
@@ -662,7 +661,6 @@ class Discriminator(nn.Module):
                     nn.Sequential(
                         Blur(),
                         nn.Conv2d(chan_in, chan_out, 4, stride = 2, padding = 1),
-                        Noise(),
                         nn.LeakyReLU(0.1),
                         nn.Conv2d(chan_out, chan_out, 3, padding = 1),
                         nn.LeakyReLU(0.1)
@@ -688,7 +686,6 @@ class Discriminator(nn.Module):
             self.to_logits = nn.Sequential(
                 Blur(),
                 nn.Conv2d(last_chan, last_chan, 3, stride = 2, padding = 1),
-                Noise(),
                 nn.LeakyReLU(0.1),
                 nn.Conv2d(last_chan, 1, 4)
             )
@@ -700,7 +697,6 @@ class Discriminator(nn.Module):
                 nn.Sequential(
                     Blur(),
                     nn.Conv2d(64, 32, 4, stride = 2, padding = 1),
-                    Noise(),
                     nn.LeakyReLU(0.1),
                     nn.Conv2d(32, 32, 3, padding = 1),
                     nn.LeakyReLU(0.1)
