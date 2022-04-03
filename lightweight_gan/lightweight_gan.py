@@ -202,6 +202,19 @@ class Blur(nn.Module):
         f = f[None, None, :] * f [None, :, None]
         return filter2d(x, f, normalized=True)
 
+class Noise(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x, noise = None):
+        b, _, h, w, device = *x.shape, x.device
+
+        if not exists(noise):
+            noise = torch.randn(b, 1, h, w, device = device)
+
+        return x + self.weight * noise
+
 # attention
 
 class DepthWiseConv2d(nn.Module):
@@ -358,7 +371,7 @@ class AugWrapper(nn.Module):
 norm_class = nn.BatchNorm2d
 
 def upsample(scale_factor = 2):
-    return nn.Upsample(scale_factor = scale_factor)
+    return nn.Upsample(scale_factor = scale_factor, mode = 'bilinear', align_corners = False)
 
 # squeeze excitation classes
 
@@ -518,6 +531,7 @@ class Generator(nn.Module):
                     upsample(),
                     Blur(),
                     nn.Conv2d(chan_in, chan_out * 2, 3, padding = 1),
+                    Noise(),
                     norm_class(chan_out * 2),
                     nn.GLU(dim = 1)
                 ),
