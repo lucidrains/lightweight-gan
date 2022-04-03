@@ -202,6 +202,19 @@ class Blur(nn.Module):
         f = f[None, None, :] * f [None, :, None]
         return filter2d(x, f, normalized=True)
 
+class Noise(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x, noise = None):
+        b, _, h, w, device = *x.shape, x.device
+
+        if not exists(noise):
+            noise = torch.randn(b, 1, h, w, device = device)
+
+        return x + self.weight * noise
+
 # attention
 
 class DepthWiseConv2d(nn.Module):
@@ -518,6 +531,7 @@ class Generator(nn.Module):
                     upsample(),
                     Blur(),
                     nn.Conv2d(chan_in, chan_out * 2, 3, padding = 1),
+                    Noise(),
                     norm_class(chan_out * 2),
                     nn.GLU(dim = 1)
                 ),
@@ -630,6 +644,7 @@ class Discriminator(nn.Module):
             self.non_residual_layers.append(nn.Sequential(
                 Blur(),
                 nn.Conv2d(init_channel, chan_out, 4, stride = 2, padding = 1),
+                Noise(),
                 nn.LeakyReLU(0.1)
             ))
 
@@ -647,6 +662,7 @@ class Discriminator(nn.Module):
                     nn.Sequential(
                         Blur(),
                         nn.Conv2d(chan_in, chan_out, 4, stride = 2, padding = 1),
+                        Noise(),
                         nn.LeakyReLU(0.1),
                         nn.Conv2d(chan_out, chan_out, 3, padding = 1),
                         nn.LeakyReLU(0.1)
@@ -672,6 +688,7 @@ class Discriminator(nn.Module):
             self.to_logits = nn.Sequential(
                 Blur(),
                 nn.Conv2d(last_chan, last_chan, 3, stride = 2, padding = 1),
+                Noise(),
                 nn.LeakyReLU(0.1),
                 nn.Conv2d(last_chan, 1, 4)
             )
@@ -683,6 +700,7 @@ class Discriminator(nn.Module):
                 nn.Sequential(
                     Blur(),
                     nn.Conv2d(64, 32, 4, stride = 2, padding = 1),
+                    Noise(),
                     nn.LeakyReLU(0.1),
                     nn.Conv2d(32, 32, 3, padding = 1),
                     nn.LeakyReLU(0.1)
