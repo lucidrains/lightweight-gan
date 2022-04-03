@@ -204,6 +204,15 @@ class Blur(nn.Module):
 
 # attention
 
+def Conv2dSame(dim_in, dim_out, kernel_size, bias = True):
+    pad_left = kernel_size // 2
+    pad_right = (pad_left - 1) if (kernel_size % 2) == 0 else pad_left
+
+    return nn.Sequential(
+        nn.ZeroPad2d((pad_left, pad_right, pad_left, pad_right)),
+        nn.Conv2d(dim_in, dim_out, kernel_size, bias = bias)
+    )
+
 class DepthWiseConv2d(nn.Module):
     def __init__(self, dim_in, dim_out, kernel_size, padding = 0, stride = 1, bias = True):
         super().__init__()
@@ -517,7 +526,7 @@ class Generator(nn.Module):
                 nn.Sequential(
                     upsample(),
                     Blur(),
-                    nn.Conv2d(chan_in, chan_out * 2, 3, padding = 1),
+                    Conv2dSame(chan_in, chan_out * 2, 4),
                     norm_class(chan_out * 2),
                     nn.GLU(dim = 1)
                 ),
@@ -526,7 +535,7 @@ class Generator(nn.Module):
             ])
             self.layers.append(layer)
 
-        self.out_conv = nn.Conv2d(features[-1], init_channel, 3, padding = 1)
+        self.out_conv = Conv2dSame(features[-1], init_channel, 4)
 
     def forward(self, x):
         x = rearrange(x, 'b c -> b c () ()')
@@ -648,7 +657,7 @@ class Discriminator(nn.Module):
                         Blur(),
                         nn.Conv2d(chan_in, chan_out, 4, stride = 2, padding = 1),
                         nn.LeakyReLU(0.1),
-                        nn.Conv2d(chan_out, chan_out, 3, padding = 1),
+                        Conv2dSame(chan_out, chan_out, 4),
                         nn.LeakyReLU(0.1)
                     ),
                     nn.Sequential(
@@ -677,14 +686,14 @@ class Discriminator(nn.Module):
             )
 
         self.to_shape_disc_out = nn.Sequential(
-            nn.Conv2d(init_channel, 64, 3, padding = 1),
+            Conv2dSame(init_channel, 64, 4),
             Residual(PreNorm(64, LinearAttention(64))),
             SumBranches([
                 nn.Sequential(
                     Blur(),
                     nn.Conv2d(64, 32, 4, stride = 2, padding = 1),
                     nn.LeakyReLU(0.1),
-                    nn.Conv2d(32, 32, 3, padding = 1),
+                    Conv2dSame(32, 32, 4),
                     nn.LeakyReLU(0.1)
                 ),
                 nn.Sequential(
