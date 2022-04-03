@@ -371,7 +371,7 @@ class AugWrapper(nn.Module):
 norm_class = nn.BatchNorm2d
 
 def upsample(scale_factor = 2):
-    return nn.Upsample(scale_factor = scale_factor)
+    return nn.Upsample(scale_factor = scale_factor, mode = 'bilinear', align_corners = False)
 
 # squeeze excitation classes
 
