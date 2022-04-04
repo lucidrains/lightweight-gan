@@ -215,6 +215,15 @@ class Noise(nn.Module):
 
         return x + self.weight * noise
 
+def Conv2dSame(dim_in, dim_out, kernel_size, bias = True):
+    pad_left = kernel_size // 2
+    pad_right = (pad_left - 1) if (kernel_size % 2) == 0 else pad_left
+
+    return nn.Sequential(
+        nn.ZeroPad2d((pad_left, pad_right, pad_left, pad_right)),
+        nn.Conv2d(dim_in, dim_out, kernel_size, bias = bias)
+    )
+
 # attention
 
 class DepthWiseConv2d(nn.Module):
@@ -563,7 +572,7 @@ class Generator(nn.Module):
                 nn.Sequential(
                     upsample(),
                     Blur(),
-                    nn.Conv2d(chan_in, chan_out * 2, 3, padding = 1),
+                    Conv2dSame(chan_in, chan_out * 2, 4),
                     Noise(),
                     norm_class(chan_out * 2),
                     nn.GLU(dim = 1)
