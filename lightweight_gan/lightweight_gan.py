@@ -237,18 +237,24 @@ class LinearAttention(nn.Module):
 
         self.kernel_size = kernel_size
         self.nonlin = nn.GELU()
+
+        self.to_lin_q = nn.Conv2d(dim, inner_dim, 1, bias = False)
+        self.to_lin_kv = DepthWiseConv2d(dim, inner_dim * 2, 3, padding = 1, bias = False)
+
         self.to_q = nn.Conv2d(dim, inner_dim, 1, bias = False)
-        self.to_kv = DepthWiseConv2d(dim, inner_dim * 2, 3, padding = 1, bias = False)
-        self.to_out = nn.Conv2d(inner_dim, dim, 1)
+        self.to_kv = nn.Conv2d(dim, inner_dim * 2, 1, bias = False)
+
+        self.to_out = nn.Conv2d(inner_dim * 2, dim, 1)
 
     def forward(self, fmap):
         h, x, y = self.heads, *fmap.shape[-2:]
-        q, k, v = (self.to_q(fmap), *self.to_kv(fmap).chunk(2, dim = 1))
-        q, k, v = map(lambda t: rearrange(t, 'b (h c) x y -> (b h) c x y', h = h), (q, k, v))
 
         # linear attention
 
-        lin_q, lin_k, lin_v = map(lambda t: rearrange(t, 'b d ... -> b (...) d'), (q, k, v))
+        lin_q, lin_k, lin_v = (self.to_lin_q(fmap), *self.to_lin_kv(fmap).chunk(2, dim = 1))
+        lin_q, lin_k, lin_v = map(lambda t: rearrange(t, 'b (h c) x y -> (b h) c x y', h = h), (lin_q, lin_k, lin_v))
+
+        lin_q, lin_k, lin_v = map(lambda t: rearrange(t, 'b d ... -> b (...) d'), (lin_q, lin_k, lin_v))
 
         lin_q = lin_q.softmax(dim = -1)
         lin_k = lin_k.softmax(dim = -2)
@@ -260,6 +266,9 @@ class LinearAttention(nn.Module):
         lin_out = rearrange(lin_out, '(b h) (x y) d -> b (h d) x y', h = h, x = x, y = y)
 
         # conv-like full attention
+
+        q, k, v = (self.to_q(fmap), *self.to_kv(fmap).chunk(2, dim = 1))
+        q, k, v = map(lambda t: rearrange(t, 'b (h c) x y -> (b h) c x y', h = h), (q, k, v))
 
         k = F.unfold(k, kernel_size = self.kernel_size, padding = self.kernel_size // 2)
         v = F.unfold(v, kernel_size = self.kernel_size, padding = self.kernel_size // 2)
@@ -278,7 +287,8 @@ class LinearAttention(nn.Module):
 
         # add outputs of linear attention + conv like full attention
 
-        out = self.nonlin(lin_out + full_out)
+        lin_out = self.nonlin(lin_out)
+        out = torch.cat((lin_out, full_out), dim = 1)
         return self.to_out(out)
 
 # dataset
