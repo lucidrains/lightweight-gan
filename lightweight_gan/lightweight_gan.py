@@ -1,10 +1,11 @@
 import os
+import aim
 import json
 import multiprocessing
 from random import random
 import math
 from math import log2, floor
-from functools import partial
+from functools import lru_cache, partial
 from contextlib import contextmanager, ExitStack
 from pathlib import Path
 from shutil import rmtree
@@ -131,6 +132,20 @@ def dual_contrastive_loss(real_logits, fake_logits):
         return F.cross_entropy(t, torch.zeros(t1.shape[0], device = device, dtype = torch.long))
 
     return loss_half(real_logits, fake_logits) + loss_half(-fake_logits, -real_logits)
+
+@lru_cache(maxsize=10)
+def det_randn(*args):
+    return torch.randn(*args)
+
+def interpolate_between(a, b, *, num_samples, dim):
+    assert num_samples > 2
+    samples = []
+    step_size = 0
+    for _ in range(num_samples):
+        sample = torch.lerp(a, b, step_size)
+        samples.append(sample)
+        step_size += 1 / (num_samples - 1)
+    return torch.stack(samples, dim=dim)
 
 # helper classes
 
@@ -938,6 +953,8 @@ class Trainer():
         world_size = 1,
         log = False,
         amp = False,
+        hparams = None,
+        log_with_aim = False,
         *args,
         **kwargs
     ):
@@ -1018,6 +1035,12 @@ class Trainer():
         self.amp = amp
         self.G_scaler = GradScaler(enabled = self.amp)
         self.D_scaler = GradScaler(enabled = self.amp)
+
+        self.run = None
+        self.hparams = hparams
+        if self.is_main and log_with_aim:
+            self.run = aim.Run()
+            self.run['hparams'] = hparams
 
     @property
     def image_extension(self):
@@ -1246,7 +1269,7 @@ class Trainer():
 
             gen_loss.register_hook(raise_if_nan)
             self.G_scaler.scale(gen_loss).backward()
-            total_gen_loss += loss 
+            total_gen_loss += loss
 
         self.g_loss = float(total_gen_loss.item() / self.gradient_accumulate_every)
         self.G_scaler.step(self.GAN.G_opt)
@@ -1301,16 +1324,56 @@ class Trainer():
 
         # latents and noise
 
-        latents = torch.randn((num_rows ** 2, latent_dim)).cuda(self.rank)
+        latents = det_randn((num_rows ** 2, latent_dim)).cuda(self.rank)
+        interpolate_latents = interpolate_between(latents[:num_rows], latents[-num_rows:],
+                                                  num_samples=num_rows,
+                                                  dim=0).flatten(end_dim=1)
 
+        generate_interpolations = self.generate_(self.GAN.G, interpolate_latents)
+        if self.run is not None:
+            grouped = generate_interpolations.view(num_rows, num_rows, *generate_interpolations.shape[1:])
+            for idx, images in enumerate(grouped):
+                alpha = idx / (len(grouped) - 1)
+                aim_images = []
+                for image in images:
+                    ndarr = image.mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()
+                    im = Image.fromarray(ndarr)
+                    aim_images.append(aim.Image(im, caption=f'#{idx}'))
+
+                self.run.track(value=aim_images, name='generated',
+                               step=self.steps,
+                               context={'interpolated': True,
+                                        'alpha': alpha})
+        torchvision.utils.save_image(generate_interpolations, str(self.results_dir / self.name / f'{str(num)}-interp.{ext}'), nrow=num_rows)
         # regular
 
         generated_images = self.generate_(self.GAN.G, latents)
+
+        if self.run is not None:
+            aim_images = []
+            for idx, image in enumerate(generated_images):
+                ndarr = image.mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()
+                im = Image.fromarray(ndarr)
+                aim_images.append(aim.Image(im, caption=f'#{idx}'))
+
+            self.run.track(value=aim_images, name='generated',
+                           step=self.steps,
+                           context={'ema': False})
         torchvision.utils.save_image(generated_images, str(self.results_dir / self.name / f'{str(num)}.{ext}'), nrow=num_rows)
-        
+
         # moving averages
 
         generated_images = self.generate_(self.GAN.GE, latents)
+        if self.run is not None:
+            aim_images = []
+            for idx, image in enumerate(generated_images):
+                ndarr = image.mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()
+                im = Image.fromarray(ndarr)
+                aim_images.append(aim.Image(im, caption=f'EMA #{idx}'))
+
+            self.run.track(value=aim_images, name='generated',
+                           step=self.steps,
+                           context={'ema': True})
         torchvision.utils.save_image(generated_images, str(self.results_dir / self.name / f'{str(num)}-ema.{ext}'), nrow=num_rows)
 
     @torch.no_grad()
@@ -1474,6 +1537,12 @@ class Trainer():
         data = [d for d in data if exists(d[1])]
         log = ' | '.join(map(lambda n: f'{n[0]}: {n[1]:.2f}', data))
         print(log)
+
+        if self.run is not None:
+            for key, value in data:
+                self.run.track(value, key, step=self.steps)
+
+        return data
 
     def model_name(self, num):
         return str(self.models_dir / self.name / f'model_{num}.pt')

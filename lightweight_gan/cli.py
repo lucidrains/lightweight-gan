@@ -53,7 +53,7 @@ def run_training(rank, world_size, model_args, data, load_from, new, num_train_s
         world_size = world_size
     )
 
-    model = Trainer(**model_args)
+    model = Trainer(**model_args, hparams=model_args, log_with_aim=True)
 
     if not new:
         model.load(load_from)
