@@ -135,6 +135,10 @@ def dual_contrastive_loss(real_logits, fake_logits):
 
 @lru_cache(maxsize=10)
 def det_randn(*args):
+    """
+    deterministic random to track the same latent vars (and images) across training steps
+    helps to visualize same image over training steps
+    """
     return torch.randn(*args)
 
 def interpolate_between(a, b, *, num_samples, dim):
@@ -1323,6 +1327,10 @@ class Trainer():
         image_size = self.GAN.image_size
 
         # latents and noise
+        def image_to_pil(image):
+            ndarr = image.mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()
+            im = Image.fromarray(ndarr)
+            return im
 
         latents = det_randn((num_rows ** 2, latent_dim)).cuda(self.rank)
         interpolate_latents = interpolate_between(latents[:num_rows], latents[-num_rows:],
@@ -1336,8 +1344,7 @@ class Trainer():
                 alpha = idx / (len(grouped) - 1)
                 aim_images = []
                 for image in images:
-                    ndarr = image.mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()
-                    im = Image.fromarray(ndarr)
+                    im = image_to_pil(image)
                     aim_images.append(aim.Image(im, caption=f'#{idx}'))
 
                 self.run.track(value=aim_images, name='generated',
@@ -1352,8 +1359,7 @@ class Trainer():
         if self.run is not None:
             aim_images = []
             for idx, image in enumerate(generated_images):
-                ndarr = image.mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()
-                im = Image.fromarray(ndarr)
+                im = image_to_pil(image)
                 aim_images.append(aim.Image(im, caption=f'#{idx}'))
 
             self.run.track(value=aim_images, name='generated',
@@ -1367,8 +1373,7 @@ class Trainer():
         if self.run is not None:
             aim_images = []
             for idx, image in enumerate(generated_images):
-                ndarr = image.mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()
-                im = Image.fromarray(ndarr)
+                im = image_to_pil(image)
                 aim_images.append(aim.Image(im, caption=f'EMA #{idx}'))
 
             self.run.track(value=aim_images, name='generated',
