@@ -958,7 +958,9 @@ class Trainer():
         log = False,
         amp = False,
         hparams = None,
-        log_with_aim = False,
+        use_aim = True,
+        aim_repo = None,
+        aim_run_hash = None,
         *args,
         **kwargs
     ):
@@ -1042,8 +1044,8 @@ class Trainer():
 
         self.run = None
         self.hparams = hparams
-        if self.is_main and log_with_aim:
-            self.run = aim.Run()
+        if self.is_main and use_aim:
+            self.run = aim.Run(run_hash=aim_run_hash, repo=aim_repo)
             self.run['hparams'] = hparams
 
     @property
