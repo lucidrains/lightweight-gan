@@ -181,11 +181,11 @@ def train_from_folder(
     world_size = torch.cuda.device_count()
 
     if world_size == 1 or not multi_gpus:
-        run_training(0, 1, model_args, data, load_from, new, num_train_steps, name, seed)
+        run_training(0, 1, model_args, data, load_from, new, num_train_steps, name, seed, use_aim, aim_repo, aim_run_hash)
         return
 
     mp.spawn(run_training,
-        args=(world_size, model_args, data, load_from, new, num_train_steps, name, seed,),
+        args=(world_size, model_args, data, load_from, new, num_train_steps, name, seed, use_aim, aim_repo, aim_run_hash,),
         nprocs=world_size,
         join=True)
 
