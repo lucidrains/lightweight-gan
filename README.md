@@ -147,6 +147,32 @@ You should expect it to be 33% faster and save up to 40% memory
 
 Also one flag to use `--multi-gpus`
 
+
+## Visualizing training insights with Aim
+
+[Aim](https://github.com/aimhubio/aim) is an open-source experiment tracker that logs your training runs, enables a beautiful UI to compare them and an API to query them programmatically.
+
+You can specify Aim logs directory with `--aim_repo` flag, otherwise logs will be stored in the current directory
+
+```bash
+$ lightweight_gan --data ./path/to/images --image-size 512 --aim_repo ./path/to/logs/
+```
+
+Execute `aim up --repo ./path/to/logs/` to run Aim UI on your server.
+
+**View all tracked runs, each metric last tracked values and tracked hyperparameters in Runs Dashboard:**
+
+<img width="1431" alt="Screen Shot 2022-04-19 at 00 48 55" src="https://user-images.githubusercontent.com/11066664/163875698-dc497334-1f77-4e18-a37e-ac0f874b9814.png">
+
+
+**Compare loss curves with Metrics Explorer - group and aggregate by any hyperparameter to easily compare the runs:**
+
+<img width="1440" alt="Screen Shot 2022-04-12 at 16 56 35" src="https://user-images.githubusercontent.com/11066664/163875452-1da3bf36-f3bc-449f-906e-cebaf9a4fd6c.png">
+
+**Compare and debug generated images across training steps and runs via Images Explorer:**
+
+<img width="1439" alt="Screen Shot 2022-04-12 at 16 57 24" src="https://user-images.githubusercontent.com/11066664/163875815-9cd8ce85-2815-4f0a-80dd-0f3258193c19.png">
+
 ## Generating
 
 Once you have finished training, you can generate samples with one command. You can select which checkpoint number to load from. If `--load-from` is not specified, will default to the latest.

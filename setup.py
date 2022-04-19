@@ -33,7 +33,8 @@ setup(
     'retry',
     'torch>=1.10',
     'torchvision',
-    'tqdm'
+    'tqdm',
+    'aim'
   ],
   classifiers=[
     'Development Status :: 4 - Beta',
