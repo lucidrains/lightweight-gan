@@ -116,9 +116,10 @@ def train_from_folder(
     seed = 42,
     amp = False,
     show_progress = False,
-    use_aim = True,
+    use_aim = False,
     aim_repo = None,
-    aim_run_hash = None
+    aim_run_hash = None,
+    load_strict = True
 ):
     num_image_tiles = default(num_image_tiles, 4 if image_size > 512 else 8)
 
@@ -149,7 +150,8 @@ def train_from_folder(
         calculate_fid_every = calculate_fid_every,
         calculate_fid_num_images = calculate_fid_num_images,
         clear_fid_cache = clear_fid_cache,
-        amp = amp
+        amp = amp,
+        load_strict = load_strict
     )
 
     if generate:

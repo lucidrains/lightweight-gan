@@ -1,5 +1,4 @@
 import os
-import aim
 import json
 import multiprocessing
 from random import random
@@ -961,6 +960,7 @@ class Trainer():
         use_aim = True,
         aim_repo = None,
         aim_run_hash = None,
+        load_strict = True,
         *args,
         **kwargs
     ):
@@ -1038,14 +1038,23 @@ class Trainer():
 
         self.syncbatchnorm = is_ddp
 
+        self.load_strict = load_strict
+
         self.amp = amp
         self.G_scaler = GradScaler(enabled = self.amp)
         self.D_scaler = GradScaler(enabled = self.amp)
 
         self.run = None
         self.hparams = hparams
+
         if self.is_main and use_aim:
-            self.run = aim.Run(run_hash=aim_run_hash, repo=aim_repo)
+            try:
+                import aim
+                self.aim = aim
+            except ImportError:
+                print('unable to import aim experiment tracker - please run `pip install aim` first')
+
+            self.run = self.aim.Run(run_hash=aim_run_hash, repo=aim_repo)
             self.run['hparams'] = hparams
 
     @property
@@ -1347,7 +1356,7 @@ class Trainer():
                 aim_images = []
                 for image in images:
                     im = image_to_pil(image)
-                    aim_images.append(aim.Image(im, caption=f'#{idx}'))
+                    aim_images.append(self.aim.Image(im, caption=f'#{idx}'))
 
                 self.run.track(value=aim_images, name='generated',
                                step=self.steps,
@@ -1362,7 +1371,7 @@ class Trainer():
             aim_images = []
             for idx, image in enumerate(generated_images):
                 im = image_to_pil(image)
-                aim_images.append(aim.Image(im, caption=f'#{idx}'))
+                aim_images.append(self.aim.Image(im, caption=f'#{idx}'))
 
             self.run.track(value=aim_images, name='generated',
                            step=self.steps,
@@ -1376,7 +1385,7 @@ class Trainer():
             aim_images = []
             for idx, image in enumerate(generated_images):
                 im = image_to_pil(image)
-                aim_images.append(aim.Image(im, caption=f'EMA #{idx}'))
+                aim_images.append(self.aim.Image(im, caption=f'EMA #{idx}'))
 
             self.run.track(value=aim_images, name='generated',
                            step=self.steps,
@@ -1597,7 +1606,7 @@ class Trainer():
             print(f"loading from version {load_data['version']}")
 
         try:
-            self.GAN.load_state_dict(load_data['GAN'])
+            self.GAN.load_state_dict(load_data['GAN'], strict = self.load_strict)
         except Exception as e:
             saved_version = load_data['version']
             print('unable to load save model. please try downgrading the package to the version specified by the saved model (to do so, just run `pip install lightweight-gan=={saved_version}`')

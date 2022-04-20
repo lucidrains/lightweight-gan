@@ -152,10 +152,16 @@ Also one flag to use `--multi-gpus`
 
 [Aim](https://github.com/aimhubio/aim) is an open-source experiment tracker that logs your training runs, enables a beautiful UI to compare them and an API to query them programmatically.
 
-You can specify Aim logs directory with `--aim_repo` flag, otherwise logs will be stored in the current directory
+First you need to install `aim` with `pip`
 
 ```bash
-$ lightweight_gan --data ./path/to/images --image-size 512 --aim_repo ./path/to/logs/
+$ pip install aim
+```
+
+Next, you can specify Aim logs directory with `--aim_repo` flag, otherwise logs will be stored in the current directory
+
+```bash
+$ lightweight_gan --data ./path/to/images --image-size 512 --use-aim --aim_repo ./path/to/logs/
 ```
 
 Execute `aim up --repo ./path/to/logs/` to run Aim UI on your server.
