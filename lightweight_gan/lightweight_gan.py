@@ -1599,7 +1599,8 @@ class Trainer():
         try:
             self.GAN.load_state_dict(load_data['GAN'])
         except Exception as e:
-            print('unable to load save model. please try downgrading the package to the version specified by the saved model')
+            saved_version = load_data['version']
+            print('unable to load save model. please try downgrading the package to the version specified by the saved model (to do so, just run `pip install lightweight-gan=={saved_version}`')
             raise e
 
         if 'G_scaler' in load_data:
