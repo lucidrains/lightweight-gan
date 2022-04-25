@@ -253,12 +253,9 @@ class QueryAndAttend(nn.Module):
         num_queries = 1,
         dim_head = 32,
         heads = 8,
-        window_size = 3,
-        eps = 1e-8
+        window_size = 3
     ):
         super().__init__()
-        self.eps = eps
-
         self.scale = dim_head ** -0.5
         inner_dim = dim_head * heads
         self.heads = heads
