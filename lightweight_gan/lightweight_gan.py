@@ -263,7 +263,7 @@ class QueryAndAttend(nn.Module):
         self.window_size = window_size
         self.num_queries = num_queries
 
-        self.rel_pos_bias = nn.Parameter(torch.randn(num_queries * heads, window_size * window_size))
+        self.rel_pos_bias = nn.Parameter(torch.randn(heads, num_queries, window_size * window_size, 1, 1))
 
         self.queries = nn.Parameter(torch.randn(heads, num_queries, dim_head))
         self.to_kv = nn.Conv2d(dim, dim_head * 2, 1, bias = False)
@@ -302,6 +302,10 @@ class QueryAndAttend(nn.Module):
         sim = F.pad(sim, ((wsz // 2,) * 4), value = mask_value)
         sim = F.unfold(sim, kernel_size = wsz)
         sim = rearrange(sim, 'b (h l j) (x y) -> b h l j x y', h = heads, l = num_queries, x = height, y = width)
+
+        # rel pos bias
+
+        sim = sim + self.rel_pos_bias
 
         # numerically stable attention
 
