@@ -264,6 +264,7 @@ class QueryAndAttend(nn.Module):
         self.num_queries = num_queries
 
         self.rel_pos_bias = nn.Parameter(torch.randn(heads, num_queries, window_size * window_size, 1, 1))
+        self.attn_weight = nn.Parameter(torch.ones(heads, num_queries, window_size * window_size, 1, 1))
 
         self.queries = nn.Parameter(torch.randn(heads, num_queries, dim_head))
         self.to_kv = nn.Conv2d(dim, dim_head * 2, 1, bias = False)
@@ -311,6 +312,8 @@ class QueryAndAttend(nn.Module):
 
         sim = sim - sim.amax(dim = -3, keepdim = True).detach()
         attn = sim.softmax(dim = -3)
+
+        attn = attn * self.attn_weight
 
         # unfold values
 
