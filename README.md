@@ -311,4 +311,14 @@ If you want the current state of the art GAN, you can find it at https://github.
 }
 ```
 
+```bibtex
+@article{Arar2021LearnedQF,
+    title   = {Learned Queries for Efficient Local Attention},
+    author  = {Moab Arar and Ariel Shamir and Amit H. Bermano},
+    journal = {ArXiv},
+    year    = {2021},
+    volume  = {abs/2112.11435}
+}
+```
+
 *What I cannot create, I do not understand* - Richard Feynman
