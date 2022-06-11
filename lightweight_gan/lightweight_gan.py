@@ -39,7 +39,7 @@ assert torch.cuda.is_available(), 'You need to have an Nvidia GPU with CUDA inst
 # constants
 
 NUM_CORES = multiprocessing.cpu_count()
-EXTS = ['jpg', 'jpeg', 'png']
+EXTS = ['jpg', 'jpeg', 'png', 'tiff']
 
 # helpers
 
