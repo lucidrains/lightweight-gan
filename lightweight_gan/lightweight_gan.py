@@ -430,8 +430,31 @@ class AugWrapper(nn.Module):
 
 norm_class = nn.BatchNorm2d
 
-def upsample(scale_factor = 2):
-    return nn.Upsample(scale_factor = scale_factor)
+class PixelShuffleUpsample(nn.Module):
+    def __init__(self, dim, dim_out = None):
+        super().__init__()
+        dim_out = default(dim_out, dim)
+        conv = nn.Conv2d(dim, dim_out * 4, 1)
+
+        self.net = nn.Sequential(
+            conv,
+            nn.SiLU(),
+            nn.PixelShuffle(2)
+        )
+
+        self.init_conv_(conv)
+
+    def init_conv_(self, conv):
+        o, i, h, w = conv.weight.shape
+        conv_weight = torch.empty(o // 4, i, h, w)
+        nn.init.kaiming_uniform_(conv_weight)
+        conv_weight = repeat(conv_weight, 'o ... -> (o 4) ...')
+
+        conv.weight.data.copy_(conv_weight)
+        nn.init.zeros_(conv.bias.data)
+
+    def forward(self, x):
+        return self.net(x)
 
 # squeeze excitation classes
 
@@ -588,9 +611,9 @@ class Generator(nn.Module):
 
             layer = nn.ModuleList([
                 nn.Sequential(
-                    upsample(),
+                    PixelShuffleUpsample(chan_in, chan_out),
                     Blur(),
-                    Conv2dSame(chan_in, chan_out * 2, 4),
+                    Conv2dSame(chan_out, chan_out * 2, 4),
                     Noise(),
                     norm_class(chan_out * 2),
                     nn.GLU(dim = 1)
@@ -644,8 +667,8 @@ class SimpleDecoder(nn.Module):
             last_layer = ind == (num_upsamples - 1)
             chan_out = chans if not last_layer else final_chan * 2
             layer = nn.Sequential(
-                upsample(),
-                nn.Conv2d(chans, chan_out, 3, padding = 1),
+                PixelShuffleUpsample(chans, chan_out),
+                nn.Conv2d(chan_out, chan_out, 3, padding = 1),
                 nn.GLU(dim = 1)
             )
             self.layers.append(layer)
