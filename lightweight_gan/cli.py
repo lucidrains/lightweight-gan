@@ -151,6 +151,7 @@ def train_from_folder(
         calculate_fid_num_images = calculate_fid_num_images,
         clear_fid_cache = clear_fid_cache,
         amp = amp,
+        use_aim = use_aim,
         load_strict = load_strict
     )
 
