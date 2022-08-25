@@ -29,6 +29,7 @@ from lightweight_gan.version import __version__
 
 from tqdm import tqdm
 from einops import rearrange, reduce, repeat
+from einops.layers.torch import Rearrange
 
 from adabelief_pytorch import AdaBelief
 
@@ -456,6 +457,15 @@ class PixelShuffleUpsample(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+def SPConvDownsample(dim, dim_out = None):
+    # https://arxiv.org/abs/2208.03641 shows this is the most optimal way to downsample
+    # named SP-conv in the paper, but basically a pixel unshuffle
+    dim_out = default(dim_out, dim)
+    return nn.Sequential(
+        Rearrange('b c (h s1) (w s2) -> b (c s1 s2) h w', s1 = 2, s2 = 2),
+        nn.Conv2d(dim * 4, dim_out, 1)
+    )
+
 # squeeze excitation classes
 
 # global context network
@@ -611,9 +621,9 @@ class Generator(nn.Module):
 
             layer = nn.ModuleList([
                 nn.Sequential(
-                    PixelShuffleUpsample(chan_in, chan_out),
+                    PixelShuffleUpsample(chan_in),
                     Blur(),
-                    Conv2dSame(chan_out, chan_out * 2, 4),
+                    Conv2dSame(chan_in, chan_out * 2, 4),
                     Noise(),
                     norm_class(chan_out * 2),
                     nn.GLU(dim = 1)
@@ -667,8 +677,8 @@ class SimpleDecoder(nn.Module):
             last_layer = ind == (num_upsamples - 1)
             chan_out = chans if not last_layer else final_chan * 2
             layer = nn.Sequential(
-                PixelShuffleUpsample(chans, chan_out),
-                nn.Conv2d(chan_out, chan_out, 3, padding = 1),
+                PixelShuffleUpsample(chans),
+                nn.Conv2d(chans, chan_out, 3, padding = 1),
                 nn.GLU(dim = 1)
             )
             self.layers.append(layer)
@@ -743,7 +753,7 @@ class Discriminator(nn.Module):
                 SumBranches([
                     nn.Sequential(
                         Blur(),
-                        nn.Conv2d(chan_in, chan_out, 4, stride = 2, padding = 1),
+                        SPConvDownsample(chan_in, chan_out),
                         nn.LeakyReLU(0.1),
                         nn.Conv2d(chan_out, chan_out, 3, padding = 1),
                         nn.LeakyReLU(0.1)
@@ -779,7 +789,7 @@ class Discriminator(nn.Module):
             SumBranches([
                 nn.Sequential(
                     Blur(),
-                    nn.Conv2d(64, 32, 4, stride = 2, padding = 1),
+                    SPConvDownsample(64, 32),
                     nn.LeakyReLU(0.1),
                     nn.Conv2d(32, 32, 3, padding = 1),
                     nn.LeakyReLU(0.1)

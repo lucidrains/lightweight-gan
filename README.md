@@ -311,4 +311,14 @@ If you want the current state of the art GAN, you can find it at https://github.
 }
 ```
 
+```bibtex
+@article{Sunkara2022NoMS,
+    title   = {No More Strided Convolutions or Pooling: A New CNN Building Block for Low-Resolution Images and Small Objects},
+    author  = {Raja Sunkara and Tie Luo},
+    journal = {ArXiv},
+    year    = {2022},
+    volume  = {abs/2208.03641}
+}
+```
+
 *What I cannot create, I do not understand* - Richard Feynman
