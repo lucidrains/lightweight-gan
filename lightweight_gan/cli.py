@@ -155,7 +155,7 @@ def train_from_folder(
     )
 
     if generate:
-        model = Trainer(**model_args)
+        model = Trainer(**model_args, use_aim = use_aim)
         model.load(load_from)
         samples_name = timestamped_filename()
         checkpoint = model.checkpoint_num
@@ -164,7 +164,7 @@ def train_from_folder(
         return
 
     if generate_interpolation:
-        model = Trainer(**model_args)
+        model = Trainer(**model_args, use_aim = use_aim)
         model.load(load_from)
         samples_name = timestamped_filename()
         model.generate_interpolation(samples_name, num_image_tiles, num_steps = interpolation_num_steps, save_frames = save_frames)
@@ -172,7 +172,7 @@ def train_from_folder(
         return
 
     if show_progress:
-        model = Trainer(**model_args)
+        model = Trainer(**model_args, use_aim = use_aim)
         model.show_progress(num_images=num_image_tiles, types=generate_types)
         return
 
