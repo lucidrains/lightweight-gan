@@ -10,7 +10,7 @@ from pathlib import Path
 from shutil import rmtree
 
 import torch
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from torch.optim import Adam
 from torch import nn, einsum
 import torch.nn.functional as F
@@ -417,7 +417,7 @@ class AugWrapper(nn.Module):
         super().__init__()
         self.D = D
 
-    def forward(self, images, prob = 0., types = [], detach = False, **kwargs):
+    def forward(self, images, prob = 0., types = [], detach = False, input_requires_grad = False, return_discr_input = False, **kwargs):
         context = torch.no_grad if detach else null_context
 
         with context():
@@ -425,7 +425,17 @@ class AugWrapper(nn.Module):
                 images = random_hflip(images, prob=0.5)
                 images = DiffAugment(images, types=types)
 
-        return self.D(images, **kwargs)
+        discr_input = images
+
+        if input_requires_grad:
+            discr_input.requires_grad_()
+
+        out = self.D(discr_input, **kwargs)
+
+        if not return_discr_input:
+            return out
+
+        return discr_input, out
 
 # modifiable global variables
 
@@ -1214,7 +1224,7 @@ class Trainer():
 
         # amp related contexts and functions
 
-        amp_context = autocast if self.amp else null_context
+        amp_context = partial(autocast, 'cuda') if self.amp else null_context
 
         # discriminator loss fn
 
@@ -1229,13 +1239,15 @@ class Trainer():
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[D_aug, G]):
             latents = torch.randn(batch_size, latent_dim).cuda(self.rank)
             image_batch = next(self.loader).cuda(self.rank)
-            image_batch.requires_grad_()
 
             with amp_context():
                 with torch.no_grad():
                     generated_images = G(latents)
 
-                fake_output, fake_output_32x32, _ = D_aug(generated_images, detach = True, **aug_kwargs)
+                if apply_gradient_penalty:
+                    image_batch.requires_grad_()
+
+                generated_images, (fake_output, fake_output_32x32, _) = D_aug(generated_images, detach = True, input_requires_grad = apply_gradient_penalty, return_discr_input = True, **aug_kwargs)
 
                 real_output, real_output_32x32, real_aux_loss = D_aug(image_batch,  calc_aux_loss = True, **aug_kwargs)
 
@@ -1250,21 +1262,31 @@ class Trainer():
                 disc_loss = disc_loss + aux_loss
 
             if apply_gradient_penalty:
-                outputs = [real_output, real_output_32x32]
-                outputs = list(map(self.D_scaler.scale, outputs)) if self.amp else outputs
+                real_outputs = [real_output, real_output_32x32]
+                real_outputs = list(map(self.D_scaler.scale, real_outputs)) if self.amp else real_outputs
 
-                scaled_gradients = torch_grad(outputs=outputs, inputs=image_batch,
-                                       grad_outputs=list(map(lambda t: torch.ones(t.size(), device = image_batch.device), outputs)),
+                fake_outputs = [fake_output, fake_output_32x32]
+                fake_outputs = list(map(self.D_scaler.scale, fake_outputs)) if self.amp else fake_outputs
+
+                scaled_real_gradients = torch_grad(outputs=real_outputs, inputs=image_batch,
+                                       grad_outputs=[torch.ones_like(t) for t in real_outputs],
+                                       create_graph=True, retain_graph=True, only_inputs=True)[0]
+
+                scaled_fake_gradients = torch_grad(outputs=fake_outputs, inputs=generated_images,
+                                       grad_outputs=[torch.ones_like(t) for t in fake_outputs],
                                        create_graph=True, retain_graph=True, only_inputs=True)[0]
 
                 inv_scale = safe_div(1., self.D_scaler.get_scale()) if self.amp else 1.
 
                 if inv_scale != float('inf'):
+                    scaled_gradients = torch.cat((scaled_real_gradients, scaled_fake_gradients))
+
                     gradients = scaled_gradients * inv_scale
 
                     with amp_context():
-                        gradients = gradients.reshape(batch_size, -1)
-                        gp =  self.gp_weight * ((gradients.norm(2, dim=1) - 1) ** 2).mean()
+                        gradients = gradients.reshape(2 * batch_size, -1)
+
+                        gp = self.gp_weight * (gradients.norm(2, dim = 1) ** 2).mean()
 
                         if not torch.isnan(gp):
                             disc_loss = disc_loss + gp
@@ -1633,7 +1655,7 @@ class Trainer():
 
         self.steps = name * self.save_every
 
-        load_data = torch.load(self.model_name(name))
+        load_data = torch.load(self.model_name(name), weights_only = True)
 
         if print_version and 'version' in load_data and self.is_main:
             print(f"loading from version {load_data['version']}")
