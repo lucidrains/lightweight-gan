@@ -25,13 +25,13 @@ setup(
   ],
   install_requires=[
     'adabelief-pytorch',
-    'einops>=0.3',
+    'einops>=0.8.0',
     'fire',
     'kornia>=0.5.4',
     'numpy',
     'pillow',
     'retry',
-    'torch>=1.10',
+    'torch>=2.2',
     'torchvision',
     'tqdm'
   ],
